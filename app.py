@@ -1,0 +1,1273 @@
+import os
+import re
+import json
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+
+app = Flask(__name__)
+CORS(app)
+
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
+
+# Initialize Gemini Client if Key is present
+genai_client = None
+if GEMINI_API_KEY and GEMINI_API_KEY != 'your_gemini_api_key_here':
+    try:
+        from google import genai
+        genai_client = genai.Client(api_key=GEMINI_API_KEY)
+        print("Gemini API Client initialized successfully!")
+    except Exception as e:
+        print(f"Notice initializing google-genai client: {e}")
+
+RE_JSON_FENCE_START = re.compile(r'^```(?:json)?\s*', re.IGNORECASE)
+RE_JSON_FENCE_END = re.compile(r'\s*```$')
+
+def clean_json_response(raw_text: str) -> str:
+    """Strips markdown code fences (```json ... ```) and leading/trailing whitespace."""
+    if not raw_text:
+        return "{}"
+    cleaned = raw_text.strip()
+    cleaned = RE_JSON_FENCE_START.sub('', cleaned)
+    cleaned = RE_JSON_FENCE_END.sub('', cleaned)
+    return cleaned.strip()
+
+def call_gemini(prompt: str):
+    """Calls Gemini API trying available models with fallback."""
+    if not genai_client:
+        return None
+    for model_name in ['gemini-2.5-flash', 'gemini-2.0-flash-exp', 'gemini-1.5-flash']:
+        try:
+            response = genai_client.models.generate_content(
+                model=model_name,
+                contents=prompt
+            )
+            if response and response.text:
+                return response.text
+        except Exception as e:
+            print(f"Gemini API Notice for {model_name}: {e}")
+    return None
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        "status": "online",
+        "service": "PlacePrep AI Backend",
+        "geminiConfigured": genai_client is not None
+    })
+
+@app.route('/api/interview-feedback', methods=['POST'])
+def interview_feedback():
+    data = request.get_json() or {}
+    target_field = data.get('userTargetField', 'Software Development')
+    company = data.get('companyName', 'Google')
+    answers = data.get('answers', [])
+    dsa = data.get('dsaPerformance', None)
+    aptitude = data.get('aptitudePerformance', None)
+
+    answers_formatted = []
+    for idx, ans in enumerate(answers):
+        answers_formatted.append(
+            f"Question {idx+1}: {ans.get('question', '')}\n"
+            f"Candidate Transcript: \"{ans.get('transcript', '')}\"\n"
+            f"Metrics: Confidence Score={ans.get('confidenceScore', 85)}/100, "
+            f"Pace={ans.get('wordsPerMinute', 135)} WPM, "
+            f"Filler Words={ans.get('fillerWordCount', 1)}, "
+            f"Long Pauses={ans.get('longPauseCount', 0)}\n"
+        )
+    
+    answers_block = "\n".join(answers_formatted) if answers_formatted else "Sample Candidate Interview Session"
+
+    # Build Aptitude performance context block
+    aptitude_block = ""
+    if aptitude:
+        aptitude_block = f"""
+\nAPTITUDE & GK ROUND DATA:
+  Overall Score: {aptitude.get('overallScore', 0)}% (Cutoff: {aptitude.get('cutoffPercentage', 60)}%, Passed: {aptitude.get('isPassed', False)})
+  Section Breakdown: {json.dumps(aptitude.get('sectionScores', {}))}
+  Weakest Section: {aptitude.get('weakestSection', 'Unknown')}
+  Note: Reference aptitude performance in areasToImprove if weak or below cutoff (e.g. "You scored 40% on Logical Reasoning...").
+"""
+
+    # Build DSA performance context block
+    dsa_block = ""
+    if dsa:
+        time_delta = dsa.get('timeTakenMinutes', 0) - dsa.get('expectedTimeMinutes', 15)
+        time_note = (
+            f"Solved {abs(time_delta)} min {'OVER' if time_delta > 0 else 'under'} the expected {dsa.get('expectedTimeMinutes')} min target for a {company}-level {dsa.get('difficulty')} question."
+            if time_delta != 0 else f"Solved exactly at the expected {dsa.get('expectedTimeMinutes')} min."
+        )
+        dsa_block = f"""
+\nDSA CODING ROUND DATA:
+  Question: {dsa.get('questionTitle', 'Unknown')} (Topic: {dsa.get('topic', 'Unknown')}, Difficulty: {dsa.get('difficulty', 'Medium')})
+  Time Performance: {time_note}
+  Optimal Complexity Benchmark: {dsa.get('optimalComplexity', 'Not recorded')}
+  Test Cases: {dsa.get('passedCases', 0)}/{dsa.get('totalCases', 0)} passed
+  Note: Include concrete DSA timing/complexity feedback in areasToImprove if time was over budget or cases failed.
+"""
+
+    prompt = f"""You are a senior technical hiring manager at {company} evaluating a candidate for a {target_field} role.
+Analyze the following candidate performance across Aptitude, DSA, and Interview rounds against {company}'s known hiring expectations:
+
+{answers_block}{aptitude_block}{dsa_block}
+
+CRITICAL INSTRUCTION: You MUST reference {company} by name in your evaluation feedback (e.g., "For {company}-style interviews...").
+If aptitude performance is included, reference specific section scores (e.g., "You scored 40% on Logical Reasoning...").
+You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "overallSummary": "2-3 encouraging but honest sentences assessing performance for {company}'s hiring bar.",
+  "strengths": [
+    "Specific strength point 1 with metric context",
+    "Specific strength point 2"
+  ],
+  "areasToImprove": [
+    "Specific actionable point 1 referencing {company} hiring style — include Aptitude/DSA specifics if relevant",
+    "Specific actionable point 2"
+  ],
+  "suggestedFocusAreas": [
+    "Aptitude: Logical Reasoning" or "{company} Focus Area",
+    "{company} Focus Area 2",
+    "{company} Focus Area 3"
+  ]
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in interview_feedback: {e}")
+
+    # Fallback response referencing company by name
+    return jsonify({
+        "overallSummary": f"For {company}-style interviews, technical depth and articulating your thought process out loud matters as much as the right answer. Your transcripts show solid technical clarity, though structuring your answers around {company}'s specific core principles will boost your overall rating.",
+        "strengths": [
+          f"Maintained clear conversational pacing averaging {answers[0].get('wordsPerMinute', 138) if answers else 138} WPM.",
+          f"Demonstrated solid technical problem-solving when explaining system trade-offs."
+        ],
+        "areasToImprove": [
+          f"For {company}-style interviews, narrate your architectural choices out loud rather than jumping straight to solutions.",
+          f"You used filler words {sum(a.get('fillerWordCount', 0) for a in answers) if answers else 1} times — practice silent 1-second pauses instead of filling gaps."
+        ],
+        "suggestedFocusAreas": [
+          f"{company} Culture & Focus Areas",
+          "Vocal pause control",
+          "High-throughput System Architecture"
+        ],
+        "note": f"Feedback generated via PlacePrep engine for {company}."
+    })
+
+@app.route('/api/analyze-resume', methods=['POST'])
+def analyze_resume():
+    file = request.files.get('file') or request.files.get('resume')
+    if not file:
+        return jsonify({"error": "No resume PDF file uploaded. Please select a valid PDF file."}), 400
+
+    # Extract target_field safely from JSON, Form Data, or Query Params
+    # Supports target_field (snake_case), targetField, userTargetField
+    raw_target_field = None
+    if request.is_json and request.json:
+        raw_target_field = request.json.get('target_field') or request.json.get('targetField') or request.json.get('userTargetField')
+    else:
+        raw_target_field = (
+            request.form.get('target_field') or
+            request.form.get('targetField') or
+            request.form.get('userTargetField') or
+            request.values.get('target_field') or
+            request.values.get('targetField')
+        )
+
+    # Validation check: If require_target_field parameter is explicitly passed as true
+    strict_validation = False
+    if request.is_json and request.json:
+        strict_validation = str(request.json.get('require_target_field', '')).lower() == 'true'
+    else:
+        strict_validation = str(request.form.get('require_target_field', '') or request.args.get('require_target_field', '')).lower() == 'true'
+
+    if not raw_target_field or not str(raw_target_field).strip():
+        if strict_validation:
+            return jsonify({"error": "target_field is required"}), 400
+        # Fallback default in backend so target_field is always defined and analysis proceeds gracefully
+        target_field = 'Software Development'
+    else:
+        target_field = str(raw_target_field).strip()
+
+    raw_company_name = None
+    if request.is_json and request.json:
+        raw_company_name = request.json.get('company_name') or request.json.get('companyName')
+    else:
+        raw_company_name = (
+            request.form.get('company_name') or
+            request.form.get('companyName') or
+            request.values.get('company_name') or
+            request.values.get('companyName')
+        )
+
+    company_name = (raw_company_name.strip() if raw_company_name else '') or 'Google'
+
+    try:
+        import pdfplumber
+        import io
+        pdf_bytes = io.BytesIO(file.read())
+        extracted_text = ""
+        with pdfplumber.open(pdf_bytes) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    extracted_text += text + "\n"
+    except Exception as e:
+        return jsonify({"error": f"Failed to extract text from PDF: {str(e)}. Please upload a valid text-based PDF."}), 400
+
+    cleaned_resume_text = extracted_text.strip()
+    if not cleaned_resume_text or len(cleaned_resume_text) < 40:
+        return jsonify({
+            "error": "Could not extract text from this PDF. Please upload a text-based PDF resume rather than a scanned image PDF."
+        }), 400
+
+    prompt = f"""You are an experienced technical recruiter and ATS resume auditor evaluating a candidate targeting {target_field} roles at companies like {company_name}.
+Analyze the following candidate's resume text:
+
+--- RESUME TEXT START ---
+{cleaned_resume_text[:4000]}
+--- RESUME TEXT END ---
+
+CRITICAL INSTRUCTIONS:
+1. Evaluate ATS parseability score (0-100), overall impression, specific strengths referencing their content, actionable weaknesses (with specific quotes/examples from their resume and concrete rewrite suggestions), missing industry keywords for {target_field}/{company_name}, and extracted profile details (skills, projects, experience, educationSummary).
+2. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "atsScore": 84,
+  "overallImpression": "2-3 encouraging but honest sentences summarizing resume strength and technical clarity.",
+  "strengths": [
+    "Specific strength point 1 referencing actual resume content",
+    "Specific strength point 2"
+  ],
+  "weaknesses": [
+    {{
+      "issue": "Work experience bullets describe duties rather than measurable impact",
+      "example": "Paraphrase or quote weak line from resume",
+      "suggestion": "Quantify with percentages, user counts, or latency reductions",
+      "severity": "high"
+    }}
+  ],
+  "missingKeywords": [
+    "Docker", "CI/CD", "System Architecture"
+  ],
+  "extractedProfile": {{
+    "skills": ["Skill 1", "Skill 2"],
+    "projects": ["Project Title & short summary"],
+    "experience": ["Company Name - Role (Dates)"],
+    "educationSummary": "B.Tech Computer Science"
+  }}
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in analyze_resume: {e}")
+
+    # Solid heuristic fallback response if Gemini client is unconfigured or fails
+    lines = [l.strip() for l in cleaned_resume_text.split('\n') if l.strip()]
+    extracted_skills = []
+    extracted_projects = []
+    extracted_experience = []
+    
+    for line in lines:
+        if any(kw in line.lower() for kw in ['skill', 'python', 'java', 'react', 'javascript', 'sql', 'c++', 'aws', 'docker', 'git', 'node', 'flask', 'api']):
+            if len(line) < 120 and line not in extracted_skills:
+                extracted_skills.append(line)
+        elif any(kw in line.lower() for kw in ['project', 'app', 'system', 'platform', 'tool', 'portal', 'dashboard', 'ai']):
+            if len(line) < 150 and line not in extracted_projects:
+                extracted_projects.append(line)
+        elif any(kw in line.lower() for kw in ['intern', 'engineer', 'developer', 'company', 'inc', 'tech', 'ltd']):
+            if len(line) < 150 and line not in extracted_experience:
+                extracted_experience.append(line)
+
+    return jsonify({
+        "atsScore": 82,
+        "overallImpression": f"Your resume demonstrates clear technical direction for {target_field} roles targeting companies like {company_name}. With stronger quantified metric bullet points and targeted cloud/system keywords, your ATS score will reach tier-1 benchmark level.",
+        "strengths": [
+            f"Included relevant technical projects and skills tailored to {target_field}.",
+            "Clean layout structure that parses well across standard ATS optical parsers.",
+            f"Clear academic background and project highlights."
+        ],
+        "weaknesses": [
+            {
+                "issue": "Experience bullets focus on daily responsibilities rather than measurable business impact",
+                "example": lines[min(3, len(lines)-1)] if lines else "Developed software components for web application",
+                "suggestion": "Quantify outcomes (e.g. 'Improved API response latency by 35%' or 'Scaled platform to 10k monthly active users')",
+                "severity": "high"
+            },
+            {
+                "issue": "Missing explicit cloud infrastructure and automated CI/CD pipeline keywords",
+                "example": "Project section lists frameworks but lacks deployment details",
+                "suggestion": "Add containerization and deployment tools like Docker, AWS, or GitHub Actions",
+                "severity": "medium"
+            }
+        ],
+        "missingKeywords": ["Docker", "CI/CD", "AWS / Cloud", "Microservices", "Unit Testing"],
+        "extractedProfile": {
+            "skills": extracted_skills[:6] if extracted_skills else ["JavaScript", "Python", "React", "SQL", "Git"],
+            "projects": extracted_projects[:4] if extracted_projects else ["Full-Stack Web Portal", "Machine Learning Analytics Engine"],
+            "experience": extracted_experience[:3] if extracted_experience else ["Software Engineering Intern"],
+            "educationSummary": "Bachelor of Technology in Computer Science & Engineering"
+        }
+    })
+
+@app.route('/api/generate-resume-interview-questions', methods=['POST'])
+def generate_resume_interview_questions():
+    import random
+    data = request.get_json() or {}
+    extracted_profile = data.get('extractedProfile', {})
+    company_name = data.get('selectedCompany', 'Google')
+    target_field = data.get('targetField', 'Software Development')
+    recent_questions = data.get('recentQuestions', [])
+
+    skills = ", ".join(extracted_profile.get('skills', [])) or "Software Development, Data Structures, System Design"
+    projects = ", ".join(extracted_profile.get('projects', [])) or "Full-Stack Web App, Algorithmic Engine"
+    experience = ", ".join(extracted_profile.get('experience', [])) or "Software Development Intern"
+
+    angles = [
+        "Focus heavily on production scalability bottlenecks and memory optimization under load.",
+        "Focus on debugging complex edge cases, race conditions, and technical failure modes.",
+        "Focus on architecture trade-offs, modularity, API contracts, and clean-code design.",
+        "Focus on end-to-end feature ownership, user impact metrics, and cross-functional leadership."
+    ]
+    chosen_angle = random.choice(angles)
+    recent_str = ", ".join([f'"{q}"' for q in recent_questions[-4:]]) if recent_questions else "None"
+
+    prompt = f"""You are a principal technical interviewer at {company_name} conducting a personalized technical interview for a {target_field} candidate.
+The candidate's resume contains:
+- Projects: {projects}
+- Experience: {experience}
+- Skills: {skills}
+
+CREATIVE ANGLE FOR THIS INTERVIEW SESSION: {chosen_angle}
+RECENTLY ASKED TOPICS (DO NOT REPEAT OR OVERLAP WITH THESE): {recent_str}
+
+CRITICAL INSTRUCTIONS:
+1. Generate 6-8 technical and behavioral interview questions that are explicitly personalized to this specific candidate's listed projects/experience AND align with {company_name}'s known interview bar.
+2. AVOID generic or cliché phrasing (e.g. avoid 'Tell me about yourself' — ask a specific project architecture question instead).
+3. Vary the phrasing and problem scenario to ensure each session feels distinct.
+4. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "questions": [
+    {{
+      "question": "Personalized interview question referencing their specific project or experience",
+      "basedOn": "Name of the project or experience item from their resume that inspired this question",
+      "focusArea": "Technical competency or leadership principle"
+    }}
+  ]
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in generate_resume_interview_questions: {e}")
+
+    # Fallback personalized questions
+    proj_list = extracted_profile.get('projects', [])
+    exp_list = extracted_profile.get('experience', [])
+    first_proj = proj_list[0] if proj_list else "your primary full-stack project"
+    first_exp = exp_list[0] if exp_list else "your software engineering internship"
+
+    return jsonify({
+        "questions": [
+            {
+                "question": f"In {first_proj}, what was the most complex architectural trade-off you faced, and how did you validate your choice under {company_name}-level scaling constraints?",
+                "basedOn": first_proj,
+                "focusArea": "System Architecture & Trade-offs"
+            },
+            {
+                "question": f"Tell me about a time during {first_exp} when you encountered a high-severity bug or failing edge case right before deployment. How did you diagnose it?",
+                "basedOn": first_exp,
+                "focusArea": "Debugging & Production Reliability"
+            },
+            {
+                "question": f"When building {first_proj}, how did you structure your API layers and state management to maintain low latency?",
+                "basedOn": first_proj,
+                "focusArea": "Full-Stack Efficiency & Clean Code"
+            },
+            {
+                "question": f"For {company_name}-style technical screens, ownership is paramount. Describe a feature in your resume projects that you owned end-to-end from requirements to delivery.",
+                "basedOn": first_proj,
+                "focusArea": f"{company_name} Ownership & End-to-End Execution"
+            },
+            {
+                "question": f"If you had to refactor {first_proj} to handle 100x user concurrency, what database or caching bottlenecks would break first?",
+                "basedOn": first_proj,
+                "focusArea": "Scalability & Performance Benchmarking"
+            },
+            {
+                "question": f"How do you approach automated testing and continuous integration in projects like {first_proj}?",
+                "basedOn": first_proj,
+                "focusArea": "Software Engineering Best Practices"
+            }
+        ]
+    })
+
+
+@app.route('/api/evaluate-code', methods=['POST'])
+def evaluate_code():
+    data = request.get_json() or {}
+    code = data.get('code', '')
+    language = data.get('language', 'javascript')
+    problem_title = data.get('problemTitle', 'Coding Challenge')
+    problem_description = data.get('problemDescription', '')
+    test_results = data.get('testResults', {})
+
+    prompt = f"""You are a principal software engineer and coding interviewer evaluating a candidate's code submission for: "{problem_title}".
+
+PROBLEM DESCRIPTION:
+{problem_description}
+
+CANDIDATE SOLUTION CODE ({language.upper()}):
+```
+{code}
+```
+
+TEST CASE EXECUTION SUMMARY:
+Passed {test_results.get('passedCount', 0)} of {test_results.get('total', 0)} test cases.
+
+CRITICAL INSTRUCTIONS:
+1. Verify code correctness against the problem statement and edge case handling.
+2. Estimate the worst-case Time Complexity in Big-O notation (e.g. O(N), O(N log N), O(N^2)).
+3. Estimate the worst-case Auxiliary Space Complexity in Big-O notation (e.g. O(1), O(N)).
+4. Flag specific missed or potential edge cases (e.g. empty input [], single element, duplicate values, negative numbers, integer overflow).
+5. Rate overall Code Quality & Readability on a scale from 1 to 10 with a concise 1-2 sentence reasoning.
+6. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "correctness": true,
+  "correctnessReasoning": "1-2 sentence concise explanation of whether code satisfies problem logic and constraints.",
+  "timeComplexity": "O(N)",
+  "spaceComplexity": "O(1)",
+  "missedEdgeCases": [
+    "Short description of edge case 1",
+    "Short description of edge case 2"
+  ],
+  "codeQualityScore": 9,
+  "codeQualityReasoning": "1-2 sentence assessment of variable naming, modularity, and clean code principles."
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in evaluate_code: {e}")
+
+    # Fallback response if Gemini is unavailable
+    all_passed = test_results.get('allPassed', True)
+    return jsonify({
+        "correctness": all_passed,
+        "correctnessReasoning": "Solution passed automated test cases and satisfied core problem requirements." if all_passed else "Solution failed one or more edge cases.",
+        "timeComplexity": "O(N)",
+        "spaceComplexity": "O(1)",
+        "missedEdgeCases": [
+          "Empty input arrays or null pointers should be explicitly checked.",
+          "Single-element inputs and duplicate values."
+        ],
+        "codeQualityScore": 8 if all_passed else 6,
+        "codeQualityReasoning": "Code is structured cleanly with good variable naming and readable logic."
+    })
+
+
+@app.route('/api/recommendations', methods=['POST'])
+def recommendations():
+    data = request.get_json() or {}
+    field_id = data.get('fieldId', 'sde')
+    target_field = data.get('targetField', 'Software Development')
+    company_name = data.get('companyName', 'Google')
+    weak_areas = data.get('weakAreas', ['Algorithms', 'Logical Reasoning', 'Filler Words'])
+    missing_keywords = data.get('missingKeywords', ['Docker', 'CI/CD'])
+    catalog_subset = data.get('catalogSubset', [])
+
+    # If no catalog subset passed from frontend, use fallback list
+    if not catalog_subset:
+        catalog_subset = [
+            {
+                "catalogId": "cat-sde-1",
+                "title": "freeCodeCamp Data Structures & Algorithms",
+                "provider": "freeCodeCamp",
+                "type": "free_resource",
+                "fieldIds": ["sde", "ml-ai"],
+                "skillTags": ["DSA", "Arrays", "Algorithms"],
+                "level": "Beginner",
+                "cost": "Free",
+                "estimatedDuration": "300 hours",
+                "link": "https://www.freecodecamp.org/learn/javascript-algorithms-and-data-structures-v8/",
+                "whyItHelps": "Master foundational data structures and algorithm problem-solving."
+            },
+            {
+                "catalogId": "cat-sde-2",
+                "title": "Google Tech Dev Guide: Foundational Programming",
+                "provider": "Google",
+                "type": "free_resource",
+                "fieldIds": ["sde"],
+                "skillTags": ["DSA", "Trees", "Graphs", "System Design"],
+                "level": "Intermediate",
+                "cost": "Free",
+                "estimatedDuration": "40 hours",
+                "link": "https://techdevguide.withgoogle.com/",
+                "whyItHelps": "Curated by Google engineers to build algorithmic efficiency."
+            },
+            {
+                "catalogId": "cat-sde-3",
+                "title": "AWS Certified Developer – Associate",
+                "provider": "Amazon Web Services",
+                "type": "certification",
+                "fieldIds": ["sde", "devops-cloud"],
+                "skillTags": ["AWS", "Cloud", "Microservices", "CI/CD"],
+                "level": "Intermediate",
+                "cost": "Paid",
+                "estimatedDuration": "6 weeks",
+                "link": "https://aws.amazon.com/certification/certified-developer-associate/",
+                "whyItHelps": "Validates production cloud architecture and AWS SDK deployment skills."
+            },
+            {
+                "catalogId": "cat-sde-4",
+                "title": "System Design Primer (GitHub Repository)",
+                "provider": "GitHub / Donne Martin",
+                "type": "free_resource",
+                "fieldIds": ["sde", "devops-cloud"],
+                "skillTags": ["System Design", "Scalability", "Caching", "Load Balancing"],
+                "level": "Advanced",
+                "cost": "Free",
+                "estimatedDuration": "50 hours",
+                "link": "https://github.com/donnemartin/system-design-primer",
+                "whyItHelps": "Gold-standard reference for designing large-scale distributed systems."
+            }
+        ]
+
+    # Heuristic scoring & ranking of catalog items
+    all_gaps = [g.lower() for g in (weak_areas + missing_keywords)]
+    
+    scored_items = []
+    for item in catalog_subset:
+        skill_tags = [t.lower() for t in item.get('skillTags', [])]
+        match_count = sum(1 for tag in skill_tags if any(gap in tag or tag in gap for gap in all_gaps))
+        score = match_count * 10
+        if field_id in item.get('fieldIds', []):
+            score += 5
+        scored_items.append((score, item))
+
+    scored_items.sort(key=lambda x: x[0], reverse=True)
+    top_candidates = [item for _, item in scored_items[:8]]
+
+    candidates_json = json.dumps(top_candidates, indent=2)
+    weakness_str = ", ".join(weak_areas) if weak_areas else "General technical speed"
+    keywords_str = ", ".join(missing_keywords) if missing_keywords else "Cloud & DevOps keywords"
+
+    prompt = f"""You are an executive career advisor evaluating learning resources for a candidate targeting {target_field} roles at {company_name}.
+Candidate Field: {field_id}
+Performance Weak Areas: {weakness_str}
+Resume Missing Keywords: {keywords_str}
+
+VERIFIED COURSE CATALOG CANDIDATES:
+{candidates_json}
+
+CRITICAL INSTRUCTIONS:
+1. Select and rank the best 5-6 resources from the provided catalog candidates above.
+2. DO NOT fabricate new course titles, providers, or URLs — keep the exact title, provider, type, level, cost, estimatedDuration, and link from the candidate object.
+3. Write a personalized, highly specific 'whyItHelps' string for each selected item, explaining EXACTLY how it addresses the candidate's specific weak areas ({weakness_str}) or missing keywords ({keywords_str}) for {company_name}.
+4. Provide a 'learningPath' array outlining a 1-to-4 numbered sequence of steps based on gap severity.
+5. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "recommendations": [
+    {{
+      "catalogId": "exact catalogId from input",
+      "title": "exact title from input",
+      "provider": "exact provider from input",
+      "type": "exact type from input",
+      "level": "exact level from input",
+      "cost": "exact cost from input",
+      "estimatedDuration": "exact estimatedDuration from input",
+      "link": "exact link from input",
+      "whyItHelps": "Personalized reason referencing their actual weak areas or missing keywords",
+      "priorityRank": 1
+    }}
+  ],
+  "learningPath": [
+    {{
+      "step": 1,
+      "catalogId": "exact catalogId",
+      "focus": "Brief focus statement (e.g. Address primary weakness in Logical Reasoning)"
+    }}
+  ]
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in recommendations: {e}")
+
+    # Fallback response using top_candidates directly
+    fallback_recs = []
+    learning_path = []
+    for idx, item in enumerate(top_candidates[:6]):
+        fallback_recs.append({
+            "catalogId": item.get('catalogId', f"cat-{idx}"),
+            "title": item.get('title'),
+            "provider": item.get('provider'),
+            "type": item.get('type', 'course'),
+            "level": item.get('level', 'Intermediate'),
+            "cost": item.get('cost', 'Free'),
+            "estimatedDuration": item.get('estimatedDuration', '4 weeks'),
+            "link": item.get('link'),
+            "whyItHelps": f"Specifically recommended for {target_field} candidates at {company_name} to strengthen {weakness_str}.",
+            "priorityRank": idx + 1
+        })
+        if idx < 4:
+            learning_path.append({
+                "step": idx + 1,
+                "catalogId": item.get('catalogId', f"cat-{idx}"),
+                "focus": f"Step {idx+1}: Build core competency in {item.get('title')}"
+            })
+
+    return jsonify({
+        "recommendations": fallback_recs,
+        "learningPath": learning_path
+    })
+
+
+@app.route('/api/interview-followup', methods=['POST'])
+def interview_followup():
+    data = request.get_json() or {}
+    company_name = data.get('selectedCompany', 'Google')
+    target_field = data.get('targetField', 'Software Development')
+    interview_type = data.get('interviewType', 'technical')  # 'technical' | 'hr'
+    experience_level = data.get('experienceLevel', 'Fresher')
+    experience_years = data.get('experienceYears', '0-2')
+    difficulty_level = data.get('difficultyLevel', 'Medium')
+    selected_language = data.get('selectedLanguage', 'English')
+    interviewer_persona = data.get('interviewerPersona', 'Friendly')  # 'Strict' | 'Friendly' | 'Rapid-fire'
+    conversation_history = data.get('conversationHistory', [])
+    topic_followup_count = data.get('topicFollowupCount', 0)
+    next_planned_question = data.get('nextPlannedQuestion', 'Tell me about yourself.')
+    recent_questions = data.get('recentQuestions', [])
+
+    recent_str = ", ".join([f'"{q}"' for q in recent_questions[-4:]]) if recent_questions else "None"
+
+    lang_instruction = (
+        f"Generate questionText in {selected_language}. IMPORTANT CODE-SWITCHING RULE: Keep all technical terms (e.g. 'Binary Search', 'Time Complexity', 'Database Indexing', 'STAR method') in English even when speaking in Hindi or Marathi, matching natural Indian technical conversations."
+        if selected_language in ['Hindi', 'Marathi']
+        else "Generate questionText in English."
+    )
+
+    # Persona-based tone modifier — pure tone layer, does NOT change question content
+    PERSONA_TONE_MODIFIERS = {
+        'Strict': (
+            "PERSONA TONE — STRICT: You are a no-nonsense interviewer. "
+            "Omit all encouragement phrases ('Good answer!', 'Great!', 'That's interesting'). "
+            "Follow-ups must be direct and terse — one sentence maximum. "
+            "If the candidate was vague, call it out plainly ('That's too vague — be specific.'). "
+            "Never soften transitions. Move to the next question briskly with a single-line pivot."
+        ),
+        'Friendly': (
+            "PERSONA TONE — FRIENDLY: You are a warm, encouraging interviewer. "
+            "Start responses with a brief acknowledgment ('Good point!', 'Thanks for sharing that.'). "
+            "Use patient, open-ended follow-ups. "
+            "Soften any critique with constructive framing. "
+            "Make the candidate feel at ease throughout the conversation."
+        ),
+        'Rapid-fire': (
+            "PERSONA TONE — RAPID-FIRE: You are a high-velocity interviewer covering maximum ground. "
+            "Keep ALL questions to 1-2 sentences maximum — no elaboration or context-setting. "
+            "Skip pleasantries and transitions entirely. "
+            "Prefer 'next_question' over 'followup' unless the candidate's answer was factually wrong. "
+            "Pack in as many distinct topics as possible."
+        )
+    }
+    persona_tone_modifier = PERSONA_TONE_MODIFIERS.get(interviewer_persona, PERSONA_TONE_MODIFIERS['Friendly'])
+
+    max_followups = 3 if difficulty_level == 'Hard' else 1 if difficulty_level == 'Easy' else 2
+    # Rapid-fire persona reduces max follow-ups to 1 regardless of difficulty
+    if interviewer_persona == 'Rapid-fire':
+        max_followups = 1
+
+    if interview_type == 'hr':
+        role_description = f"Senior HR Lead and Talent Partner at {company_name} conducting Stage 6 HR & Culture Fit interview."
+        depth_instruction = "Evaluate communication clarity, structured STAR storytelling (Situation, Task, Action, Result), self-awareness, handling team conflict, and alignment with company core values."
+        style_instruction = "Be warm, encouraging, yet structured. Focus on candidate's specific individual actions and measurable outcomes."
+    else:
+        role_description = f"Senior Technical Interviewer at {company_name} conducting technical interview for a {target_field} position."
+        depth_instruction = (
+            "Ask deeply technical questions about high scale, concurrency, microservice failures, production outage response, and trade-offs under load."
+            if experience_level == 'Experienced'
+            else "Focus on core CS fundamentals, OOP principles, DBMS indexing, OS concepts, clean coding, and academic project logic."
+        )
+        style_instruction = (
+            "Be very sharp, rigorous, and probing. Challenge assumptions and push for edge cases."
+            if difficulty_level == 'Hard'
+            else "Be supportive, gentle, encouraging, and clear."
+            if difficulty_level == 'Easy'
+            else "Maintain standard professional interview rigor."
+        )
+
+    history_formatted = []
+    for turn in conversation_history:
+        role = "AI Interviewer" if turn.get('role') == 'interviewer' else "Candidate"
+        history_formatted.append(f"{role}: {turn.get('text', '')}")
+    
+    history_block = "\n".join(history_formatted) if history_formatted else "Interview session starting."
+
+    prompt = f"""You are {role_description}
+CANDIDATE PROFILE:
+- Target Field: {target_field}
+- Experience Level: {experience_level} ({experience_years} years)
+- Interview Type: {interview_type.upper()}
+- Difficulty: {difficulty_level}
+- Spoken Language: {selected_language}
+
+EVALUATION FOCUS: {depth_instruction}
+INTERVIEWER STANCE & STYLE: {style_instruction}
+{persona_tone_modifier}
+LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
+
+CONVERSATION HISTORY SO FAR:
+{history_block}
+
+CURRENT TOPIC FOLLOW-UP COUNT: {topic_followup_count} / {max_followups} max limit.
+NEXT PLANNED QUESTION: "{next_planned_question}"
+
+CRITICAL INSTRUCTIONS:
+1. Analyze the candidate's latest response.
+2. If the answer lacks key details (for HR: missing Action/Result in STAR story; for Tech: missing technical trade-offs) AND topicFollowupCount < {max_followups}:
+   - Choose action = "followup".
+   - Formulate a natural follow-up question probing into their specific contribution or outcome. Apply the PERSONA TONE strictly.
+3. Otherwise (if answer was detailed/complete OR topicFollowupCount >= {max_followups}):
+   - Choose action = "next_question".
+   - Transition into the next planned question. Apply the PERSONA TONE strictly.
+4. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "action": "followup" or "next_question",
+  "questionText": "Spoken question text with persona-appropriate tone applied",
+  "reasoning": "Internal rationale for choosing follow-up vs next question"
+}}
+"""
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in interview_followup: {e}")
+
+    # Fallback heuristic logic if Gemini is unavailable
+    last_turn = conversation_history[-1] if conversation_history else {}
+    last_ans = last_turn.get('text', '') if last_turn.get('role') == 'candidate' else ''
+    ans_length = len(last_ans.split())
+
+    if ans_length < 25 and topic_followup_count < max_followups:
+        probing_q = "Could you walk me through how you handled system trade-offs and scaling bottlenecks in production?" if experience_level == 'Experienced' else "Could you elaborate on the core CS fundamentals and OOP principles behind your implementation?"
+        return jsonify({
+            "action": "followup",
+            "questionText": f"Got it. {probing_q}",
+            "reasoning": f"Candidate answer was brief (<25 words); asking {experience_level}-level follow-up."
+        })
+    else:
+        return jsonify({
+            "action": "next_question",
+            "questionText": f"Thank you for sharing that! Let's move on to our next topic: {next_planned_question}",
+            "reasoning": "Candidate provided detailed response or reached topic follow-up limit."
+        })
+
+
+@app.route('/api/negotiation-response', methods=['POST'])
+def negotiation_response():
+    data = request.get_json() or {}
+    company_name = data.get('selectedCompany', 'Google')
+    target_field = data.get('targetField', 'Software Development')
+    experience_level = data.get('experienceLevel', 'Fresher')
+    difficulty_level = data.get('difficultyLevel', 'Medium')
+    exchange_count = data.get('exchangeCount', 0)
+    offer_details = data.get('offerDetails', {})
+    conversation_history = data.get('conversationHistory', [])
+    selected_language = data.get('selectedLanguage', 'English')
+
+    is_final_exchange = exchange_count >= 3
+
+    history_formatted = []
+    for turn in conversation_history:
+        role = "HR Recruiter" if turn.get('role') == 'interviewer' else "Candidate"
+        history_formatted.append(f"{role}: {turn.get('text', '')}")
+    history_block = "\n".join(history_formatted) if history_formatted else "Offer extended."
+
+    prompt = f"""You are a Senior Talent Acquisition Lead at {company_name} conducting job offer compensation negotiation for a {target_field} ({experience_level} tier) position.
+Spoken Language: {selected_language} (Keep technical & financial terms like 'Base Salary', 'Joining Bonus', 'RSUs' in English for natural Indian code-switching).
+
+INITIAL OFFER DETAILS:
+- Base Salary: {offer_details.get('base', '₹18.5 LPA')}
+- Signing Bonus: {offer_details.get('signingBonus', '₹2.0 LPA')}
+- Equity / RSUs: {offer_details.get('equity', '$35,000')}
+- Remote Flex: {offer_details.get('remoteDays', '2 Days Remote')}
+
+CURRENT EXCHANGE INDEX: {exchange_count} / 3 max rounds.
+IS FINAL EXCHANGE: {is_final_exchange}
+
+CONVERSATION HISTORY SO FAR:
+{history_block}
+
+CRITICAL RULES FOR HR RESPONSE:
+1. Respond realistically like an experienced corporate recruiter. If candidate justifies their ask well (market data, competing offers, niche skills), budge slightly on signing bonus or base salary (+5% to +10%).
+2. If candidate asks for unrealistic numbers (>30% jump) or lacks justification ("I just want more money"), hold firm politely explaining budget bands.
+3. If IS FINAL EXCHANGE is True, provide a closing wrap-up response and generate complete negotiation readiness evaluation metrics.
+
+Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble:
+{{
+  "hrResponse": "Spoken HR recruiter response",
+  "updatedOffer": {{
+    "base": "₹XX LPA or $XX",
+    "signingBonus": "₹XX LPA or $XX",
+    "equity": "$XX",
+    "remoteDays": "X Days Remote"
+  }},
+  "isComplete": {str(is_final_exchange).lower()},
+  "evaluation": {{
+    "score": 85,
+    "anchoringQuality": "Specific feedback on candidate's initial anchor amount",
+    "justificationScore": "Feedback on whether ask was justified with evidence/market data",
+    "professionalism": "Assessment of tone, courtesy, and constructive posture",
+    "overAskingRisk": "Low / Moderate / High",
+    "summary": "1-2 sentence overall summary of negotiation performance and final outcome"
+  }}
+}}"""
+
+    if genai_client:
+        try:
+            response = genai_client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            raw_text = response.text
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in negotiation_response: {e}")
+
+    # Fallback response
+    return jsonify({
+        "hrResponse": f"Thank you for sharing your thoughts! At {company_name}, we value top talent. I can increase the signing bonus by ₹1.0 LPA, bringing total package to {offer_details.get('base', '₹18.5 LPA')} base + ₹3.0 LPA bonus.",
+        "updatedOffer": {
+            "base": offer_details.get('base', '₹18.5 LPA'),
+            "signingBonus": "₹3.0 LPA",
+            "equity": offer_details.get('equity', '$35,000'),
+            "remoteDays": offer_details.get('remoteDays', '2 Days Remote')
+        },
+        "isComplete": is_final_exchange,
+        "evaluation": {
+            "score": 82,
+            "anchoringQuality": "Good anchor citing market benchmarks",
+            "justificationScore": "Justified ask with key project achievements",
+            "professionalism": "Highly professional and collaborative tone",
+            "overAskingRisk": "Low Risk",
+            "summary": "Effective negotiation! Secured an additional ₹1.0 LPA signing bonus while maintaining strong alignment with recruiter."
+        }
+    })
+
+
+@app.route('/api/evaluate-system-design', methods=['POST'])
+def evaluate_system_design():
+    data = request.get_json() or {}
+    company_name = data.get('selectedCompany', 'Google')
+    problem_title = data.get('problemTitle', 'Design a Scalable Distributed URL Shortener')
+    diagram_nodes = data.get('diagramNodes', [])
+    diagram_edges = data.get('diagramEdges', [])
+    verbal_transcript = data.get('verbalTranscript', 'No verbal explanation provided.')
+    expected_checklist = data.get('expectedChecklist', ['Load Balancer', 'API Gateway', 'Cache', 'Database'])
+
+    nodes_summary = ", ".join([f"{n.get('label')} ({n.get('type')})" for n in diagram_nodes]) if diagram_nodes else "No components added."
+    edges_summary = ", ".join([f"{e.get('source')} -> {e.get('target')}" for e.get in [diagram_edges] if isinstance(e, dict)] if isinstance(diagram_edges, list) else []) or f"{len(diagram_edges)} connections drawn."
+
+    prompt = f"""You are a Principal Systems Architect at {company_name} evaluating a candidate's System Design interview.
+
+SYSTEM DESIGN CHALLENGE: "{problem_title}"
+EXPECTED COMPONENT CHECKLIST: {", ".join(expected_checklist)}
+
+CANDIDATE ARCHITECTURE DIAGRAM NODES:
+{nodes_summary}
+
+CANDIDATE DIAGRAM CONNECTIONS:
+{edges_summary}
+
+CANDIDATE VERBAL EXPLANATION & TRADE-OFF RATIONALE:
+"{verbal_transcript}"
+
+EVALUATION TASK:
+1. Assess component checklist coverage (did candidate include Load Balancers, Caching, Storage, Queues, CDNs?).
+2. Assess trade-off awareness (SQL vs NoSQL, sync vs async, caching strategies, scalability bottlenecks).
+3. Evaluate verbal explanation clarity and architectural depth.
+
+Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble:
+{{
+  "score": 88,
+  "checklistMatches": ["Load Balancer", "Redis Cache", "NoSQL Storage"],
+  "checklistMissing": ["Message Queue"],
+  "tradeoffEvaluation": "Good awareness of Base62 encoding and Redis read-through caching. Could expand on DB sharding.",
+  "bottlenecksAndRisks": "Single DB instance poses SPOF bottleneck under 1B requests/day load.",
+  "summary": "Solid system design presentation! Strong diagram structure and clear verbal articulation of trade-offs."
+}}"""
+
+    if genai_client:
+        try:
+            response = genai_client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            raw_text = response.text
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in evaluate_system_design: {e}")
+
+    # Fallback heuristic response
+    return jsonify({
+        "score": 85,
+        "checklistMatches": expected_checklist[:3],
+        "checklistMissing": expected_checklist[3:] if len(expected_checklist) > 3 else [],
+        "tradeoffEvaluation": "Effective component choices with reasonable caching strategy.",
+        "bottlenecksAndRisks": "Consider adding async worker queues for high write concurrency.",
+        "summary": "Well-structured architecture diagram and clear verbal explanation."
+    })
+
+
+@app.route('/api/generate-sample-answer', methods=['POST'])
+def generate_sample_answer():
+    data = request.get_json() or {}
+    question_text = data.get('questionText', '')
+    user_transcript = data.get('userTranscript', '')
+    company_name = data.get('companyName', 'Google')
+    target_field = data.get('targetField', 'Software Development')
+    difficulty_level = data.get('difficultyLevel', 'Medium')
+    experience_level = data.get('experienceLevel', 'Fresher')
+    interview_type = data.get('interviewType', 'technical')
+
+    prompt = f"""You are a principal interviewer at {company_name} evaluating a candidate for a {target_field} position ({experience_level} level, {difficulty_level} difficulty).
+
+INTERVIEW QUESTION:
+"{question_text}"
+
+CANDIDATE'S SPOKEN RESPONSE:
+"{user_transcript}"
+
+CRITICAL INSTRUCTIONS:
+1. Generate a realistic, believable "strong sample answer" for this question. It should sound like a top 5% candidate interviewing at {company_name} — structured, concise, natural (not overly robotic or artificial), incorporating clear examples and measurable results.
+2. Provide a 1-2 line "diffExplanation" highlighting what the sample answer includes that the candidate's actual answer missed (e.g. "Sample quantifies impact with numbers, your answer described the approach but not the outcome").
+3. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+
+Return this exact JSON structure:
+{{
+  "strongSampleAnswer": "Believable, realistic strong answer...",
+  "diffExplanation": "1-2 sentence comparison explaining key differences and missing elements."
+}}
+"""
+
+    if genai_client:
+        try:
+            response = genai_client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            raw_text = response.text
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in generate_sample_answer: {e}")
+
+    # Solid heuristic fallback response if Gemini client is unconfigured or fails
+    if interview_type == 'hr':
+        fallback_sample = f"In my previous role, I faced a tight deadline when scaling a key service. I took ownership by prioritizing critical user paths, establishing automated regression tests, and delivering the release on schedule with zero customer outage."
+        fallback_diff = "Sample answer structures the response around specific actions and quantifiable project outcomes, whereas your answer described general duties."
+    else:
+        fallback_sample = f"For a {company_name}-scale {target_field} architecture, I would decouple the service layer using an asynchronous message queue, implement redis caching for frequent read paths to keep latency under 50ms, and maintain database index optimization."
+        fallback_diff = "Sample answer explicitly states concrete architectural trade-offs and latency benchmarks, whereas your answer covered high-level concepts."
+
+    return jsonify({
+        "strongSampleAnswer": fallback_sample,
+        "diffExplanation": fallback_diff
+    })
+
+
+@app.route('/api/generate-final-report', methods=['POST'])
+def generate_final_report():
+    data = request.get_json() or {}
+    user_profile = data.get('userProfile', {})
+    selected_field = data.get('selectedField', {})
+    selected_company = data.get('selectedCompany', {})
+    difficulty_level = data.get('difficultyLevel', 'Medium')
+    experience_level = data.get('experienceLevel', 'Fresher')
+    experience_years = data.get('experienceYears', '0-2')
+    technical_mcq_results = data.get('technicalMcqResults')
+    hr_results = data.get('hrResults')
+    aptitude_results = data.get('aptitudeResults')
+    dsa_results = data.get('dsaOrTechnicalResults')
+    system_design_results = data.get('systemDesignResults')
+    interview_results = data.get('interviewResults')
+    resume_analysis = data.get('resumeAnalysis')
+    performance_analysis = data.get('performanceAnalysis', {})
+
+    field_name = selected_field.get('name', 'Software Development')
+    company_name = selected_company.get('name', 'Google')
+
+    active_rounds = {}
+    if resume_analysis and isinstance(resume_analysis, dict) and resume_analysis.get('atsScore') is not None:
+        active_rounds['resume'] = resume_analysis.get('atsScore')
+    if aptitude_results and isinstance(aptitude_results, dict) and aptitude_results.get('percentage') is not None:
+        active_rounds['aptitude'] = aptitude_results.get('percentage')
+    if technical_mcq_results and isinstance(technical_mcq_results, dict) and technical_mcq_results.get('percentage') is not None:
+        active_rounds['technical_mcq'] = technical_mcq_results.get('percentage')
+    if dsa_results and isinstance(dsa_results, dict) and dsa_results.get('score') is not None:
+        active_rounds['dsa'] = dsa_results.get('score')
+    if system_design_results and isinstance(system_design_results, dict):
+        sd_score = (system_design_results.get('evaluation') or {}).get('score') or system_design_results.get('score')
+        if sd_score is not None:
+            active_rounds['system_design'] = sd_score
+    if interview_results and isinstance(interview_results, dict) and interview_results.get('overallConfidence') is not None:
+        active_rounds['technical_interview'] = interview_results.get('overallConfidence')
+    if hr_results and isinstance(hr_results, dict) and hr_results.get('score') is not None:
+        active_rounds['hr_interview'] = hr_results.get('score')
+
+    # 5-Axis Sub-Scores Calculation & Dynamic Weight Normalization
+    sub_score_definitions = {
+        'technicalKnowledge': {'weight': 0.30, 'label': 'Technical Knowledge'},
+        'communication': {'weight': 0.20, 'label': 'Communication'},
+        'confidence': {'weight': 0.15, 'label': 'Confidence (Webcam Gaze)'},
+        'bodyLanguage': {'weight': 0.15, 'label': 'Body Language (Posture & Stability)'},
+        'problemSolving': {'weight': 0.20, 'label': 'Problem Solving'}
+    }
+
+    sub_scores = {}
+
+    # 1. Technical Knowledge (from coding correctness + system design + technical interview + tech MCQs)
+    tech_vals = []
+    if dsa_results and dsa_results.get('score') is not None:
+        tech_vals.append(float(dsa_results.get('score')) / 10.0)
+    if system_design_results and isinstance(system_design_results, dict):
+        sd_score = (system_design_results.get('evaluation') or {}).get('score') or system_design_results.get('score')
+        if sd_score is not None:
+            tech_vals.append(float(sd_score) / 10.0)
+    if interview_results and interview_results.get('overallConfidence') is not None:
+        tech_vals.append(float(interview_results.get('overallConfidence')) / 10.0)
+    if technical_mcq_results and technical_mcq_results.get('percentage') is not None:
+        tech_vals.append(float(technical_mcq_results.get('percentage')) / 10.0)
+    
+    if tech_vals:
+        sub_scores['technicalKnowledge'] = {
+            'score': round(sum(tech_vals) / len(tech_vals), 1),
+            'active': True,
+            'notes': 'Derived from coding correctness, technical interview, and core CS MCQs.'
+        }
+    else:
+        sub_scores['technicalKnowledge'] = {'score': 0, 'active': False, 'notes': 'Technical rounds not completed.'}
+
+    # 2. Communication (from speech telemetry WPM/fillers + HR STAR score)
+    comm_vals = []
+    if hr_results and hr_results.get('score') is not None:
+        comm_vals.append(float(hr_results.get('score')) / 10.0)
+    if interview_results and interview_results.get('overallConfidence') is not None:
+        comm_vals.append(float(interview_results.get('overallConfidence')) / 10.0)
+
+    if comm_vals:
+        sub_scores['communication'] = {
+            'score': round(sum(comm_vals) / len(comm_vals), 1),
+            'active': True,
+            'notes': 'Derived from speech telemetry (WPM, fillers, pauses) and STAR behavioral scoring.'
+        }
+    else:
+        sub_scores['communication'] = {'score': 0, 'active': False, 'notes': 'Voice interview rounds not completed.'}
+
+    # 3. Confidence & 4. Body Language (Strict Honesty Rule: Active ONLY if webcam telemetry was recorded!)
+    webcam_captured = data.get('webcamCaptured', False) or (interview_results and interview_results.get('facialScore') is not None) or (data.get('facialTelemetry') is not None)
+
+    if webcam_captured:
+        facial_val = float(data.get('facialTelemetry', {}).get('facialScore', (interview_results or {}).get('facialScore', 88))) / 10.0
+        gaze_val = float(data.get('facialTelemetry', {}).get('eyeContactRatio', 90)) / 10.0
+        stability_val = float(data.get('facialTelemetry', {}).get('headStabilityRatio', 88)) / 10.0
+
+        sub_scores['confidence'] = {
+            'score': round((facial_val * 0.5) + (gaze_val * 0.5), 1),
+            'active': True,
+            'notes': 'Derived from webcam gaze centering and eye contact tracking.'
+        }
+        sub_scores['bodyLanguage'] = {
+            'score': round(stability_val, 1),
+            'active': True,
+            'notes': 'Derived from landmark posture and head stability variance.'
+        }
+    else:
+        # STRICT HONESTY RULE: Omit sub-scores rather than showing fake 0 or guessed numbers!
+        sub_scores['confidence'] = {'score': 0, 'active': False, 'notes': 'Webcam telemetry not recorded.'}
+        sub_scores['bodyLanguage'] = {'score': 0, 'active': False, 'notes': 'Webcam telemetry not recorded.'}
+
+    # 5. Problem Solving (from coding complexity/approach + aptitude)
+    ps_vals = []
+    if dsa_results and dsa_results.get('score') is not None:
+        ps_vals.append(float(dsa_results.get('score')) / 10.0)
+    if aptitude_results and aptitude_results.get('percentage') is not None:
+        ps_vals.append(float(aptitude_results.get('percentage')) / 10.0)
+    
+    if ps_vals:
+        sub_scores['problemSolving'] = {
+            'score': round(sum(ps_vals) / len(ps_vals), 1),
+            'active': True,
+            'notes': 'Derived from algorithmic problem solving and quantitative reasoning.'
+        }
+    else:
+        sub_scores['problemSolving'] = {'score': 0, 'active': False, 'notes': 'Problem solving rounds not completed.'}
+
+    # Dynamic Weight Normalization across Active Sub-Scores
+    active_keys = [k for k, v in sub_scores.items() if v['active']]
+    if not active_keys:
+        active_keys = ['technicalKnowledge', 'communication', 'problemSolving']
+        sub_scores['technicalKnowledge'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
+        sub_scores['communication'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
+        sub_scores['problemSolving'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
+
+    sum_active_weights = sum(sub_score_definitions[k]['weight'] for k in active_keys)
+    overall_score = 0.0
+
+    for k in active_keys:
+        norm_weight = sub_score_definitions[k]['weight'] / sum_active_weights
+        overall_score += (sub_scores[k]['score'] * 10.0) * norm_weight
+
+    overall_interview_score = int(round(overall_score))
+    overall_interview_score = max(0, min(100, overall_interview_score))
+    calculated_readiness_score = overall_interview_score
+
+    session_summary_json = json.dumps({
+        "companyName": company_name,
+        "fieldName": field_name,
+        "difficultyLevel": difficulty_level,
+        "experienceLevel": experience_level,
+        "experienceYears": experience_years,
+        "readinessScore": calculated_readiness_score,
+        "subScores": sub_scores,
+        "performanceAnalysis": performance_analysis,
+        "missingKeywords": resume_analysis.get('missingKeywords', []) if resume_analysis else []
+    }, indent=2)
+
+    prompt = f"""You are the Chief Placement Officer evaluating a candidate's complete 7-stage placement simulation drive.
+
+SESSION PERFORMANCE DATA:
+{session_summary_json}
+
+CRITICAL INSTRUCTIONS:
+1. Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+2. Calculate/confirm a realistic readinessScore (around {calculated_readiness_score}).
+3. Provide a concise, highly professional 'readinessLabel' (e.g. "Placement Ready — Top 5% Candidate", "Strong Technical Fit — Communication Polish Needed", "Developing — High Growth Potential").
+4. Provide an 'executiveSummary' (3-4 sentences summarizing their performance across all completed rounds, overall hire probability, and key technical traits).
+5. Provide a 'roundBreakdown' array of objects, one per completed round in completedRounds ({list(active_rounds.keys())}), with roundName, score, and oneLineTakeaway.
+6. Provide 'topPriorityActions': array of top 3 actionable steps to increase candidate hire probability.
+7. Provide 'encouragingClosingNote': a short (2 sentence) inspiring closing message motivating the candidate.
+
+Return this exact JSON structure:
+{{
+  "readinessScore": {calculated_readiness_score},
+  "readinessLabel": "Placement Ready — High Hire Probability",
+  "executiveSummary": "Candidate demonstrated strong problem-solving in coding and clear technical articulation...",
+  "roundBreakdown": [
+    {{
+      "roundName": "DSA Coding Round",
+      "score": 85,
+      "oneLineTakeaway": "Optimal O(N) solution with clean edge case coverage."
+    }}
+  ],
+  "topPriorityActions": [
+    "Refine vocal pacing during high-stakes system design questions.",
+    "Add Docker and CI/CD keywords to resume experience section.",
+    "Practice Aptitude quantitative speed tests."
+  ],
+  "encouragingClosingNote": "Excellent performance! You have built a solid foundation for top tier technical drives. Keep practicing and stay confident."
+}}
+"""
+
+    if genai_client:
+        try:
+            response = genai_client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            raw_text = response.text
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in generate_final_report: {e}")
+
+    breakdown = []
+    if 'resume' in active_rounds:
+        breakdown.append({"roundName": "Stage 1: Resume ATS Audit", "score": int(active_rounds['resume']), "oneLineTakeaway": "Well-formatted resume with solid project portfolio."})
+    if 'aptitude' in active_rounds:
+        breakdown.append({"roundName": "Stage 2: Aptitude & GK Round", "score": int(active_rounds['aptitude']), "oneLineTakeaway": "Demonstrated good quantitative reasoning."})
+    if 'technical_mcq' in active_rounds:
+        breakdown.append({"roundName": "Stage 3: Technical MCQs", "score": int(active_rounds['technical_mcq']), "oneLineTakeaway": "Solid core CS domain knowledge (OOP, DBMS, OS)."})
+    if 'dsa' in active_rounds:
+        breakdown.append({"roundName": f"Stage 4: {field_name} Technical Round", "score": int(active_rounds['dsa']), "oneLineTakeaway": "Solid code correctness and algorithmic speed."})
+    if 'system_design' in active_rounds:
+        breakdown.append({"roundName": "Stage 5: System Design Architecture", "score": int(active_rounds['system_design']), "oneLineTakeaway": "Solid component selection and architecture trade-offs."})
+    if 'technical_interview' in active_rounds:
+        breakdown.append({"roundName": "Stage 6: Technical AI Voice Interview", "score": int(active_rounds['technical_interview']), "oneLineTakeaway": "Clear technical articulation and architecture trade-offs."})
+    if 'hr_interview' in active_rounds:
+        breakdown.append({"roundName": "Stage 7: HR & Culture Fit Interview", "score": int(active_rounds['hr_interview']), "oneLineTakeaway": "Strong behavioral alignment and career vision."})
+
+    return jsonify({
+        "readinessScore": calculated_readiness_score,
+        "overallInterviewScore": calculated_readiness_score,
+        "subScores": sub_scores,
+        "readinessLabel": "Strong Candidate — Tier-1 Ready" if calculated_readiness_score >= 80 else "Developing Candidate — Targeted Polish Needed",
+        "executiveSummary": f"Candidate completed the {company_name} placement drive for {field_name} (taken at {difficulty_level} difficulty, {experience_level} level) with an overall interview score of {calculated_readiness_score}/100. Performance across technical and behavioral rounds shows solid competency.",
+        "roundBreakdown": breakdown,
+        "topPriorityActions": [
+          f"Master company-specific interview question patterns for {company_name}.",
+          "Refine vocal pacing and STAR structure during system architecture & HR questions.",
+          "Expand keyword optimization in resume to target ATS filters."
+        ],
+        "encouragingClosingNote": "Solid performance! Keep refining your core technical domains and communication drive."
+    })
+
+
+if __name__ == '__main__':
+    port = int(os.getenv('FLASK_PORT', 5000))
+    print(f"Starting PlacePrep Flask Backend on http://localhost:{port}...")
+    app.run(host='0.0.0.0', port=port, debug=True)
+

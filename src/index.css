@@ -1,0 +1,116 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+body {
+  background-color: #FBEFE6;
+  color: #2E2019;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading {
+  font-family: 'Fraunces', Georgia, serif;
+}
+
+/* Warm peach porcelain cards & panels (~16px radius) */
+.glass-panel {
+  background: #FDF4EC;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #EAD5C7;
+  box-shadow: 0 8px 24px -4px rgba(46, 32, 25, 0.06);
+  border-radius: 1rem;
+}
+
+.glass-panel-interactive {
+  background: #FDF4EC;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid #EAD5C7;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 8px 24px -4px rgba(46, 32, 25, 0.06);
+  border-radius: 1rem;
+}
+
+.glass-panel-interactive:hover {
+  border-color: rgba(181, 101, 74, 0.5);
+  transform: translateY(-5px);
+  box-shadow: 0 16px 36px -6px rgba(181, 101, 74, 0.22), 0 6px 16px -4px rgba(46, 32, 25, 0.08);
+}
+/* Card interactive hover state for feature cards across the app */
+.card-interactive {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 220ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  will-change: transform, box-shadow;
+}
+
+.card-interactive:hover {
+  transform: translateY(-6px) !important;
+  box-shadow: 0 18px 38px -6px rgba(181, 101, 74, 0.25), 0 8px 20px -4px rgba(46, 32, 25, 0.1) !important;
+  border-color: rgba(181, 101, 74, 0.6) !important;
+}
+
+.card-interactive:hover .icon-badge {
+  transform: scale(1.1);
+  background-color: #F9E5DD;
+}
+
+.card-interactive:hover .arrow-icon {
+  transform: translateX(6px);
+}
+
+.card-interactive:hover .link-text {
+  text-decoration: underline;
+}
+
+.icon-badge {
+  transition: transform 220ms ease-out, background-color 220ms ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.arrow-icon {
+  transition: transform 220ms ease-out;
+  display: inline-block;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #B5654A 0%, #9C4F36 45%, #D98E77 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-text-earth {
+  background: linear-gradient(135deg, #B5654A 0%, #D98E77 60%, #3D2B24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.bg-hero-diagonal {
+  background: linear-gradient(135deg, #FBEFE6 0%, #F8E5DF 50%, #F0C5B7 100%);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FBEFE6;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #EAD5C7;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #B5654A;
+}
+
+
