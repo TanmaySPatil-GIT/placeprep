@@ -680,9 +680,9 @@ function runWithLocalJS(sourceCode, language, input, expectedOutput) {
   };
 }
 
-const FLASK_RUN_CODE_URL = import.meta.env.VITE_FLASK_API_URL
-  ? `${import.meta.env.VITE_FLASK_API_URL}/api/run-code`
-  : 'http://localhost:5000/api/run-code';
+import { getBackendUrl } from '../config/api';
+
+const FLASK_RUN_CODE_URL = `${getBackendUrl()}/api/run-code`;
 
 /**
  * Execute single test case by routing through Flask backend (which calls Judge0 CE server-side, bypassing browser CORS)

@@ -9,25 +9,25 @@ body {
   line-height: 1.6;
 }
 
-h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading {
-  font-family: 'Fraunces', Georgia, serif;
+h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading, .font-serif, .font-display {
+  font-family: 'Sora', system-ui, sans-serif;
 }
 
-/* Warm peach porcelain cards & panels (~16px radius) */
+/* Cream porcelain cards & panels (~16px radius) */
 .glass-panel {
-  background: #FDF4EC;
+  background: #FFFDFB;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid #EAD5C7;
+  border: 1px solid #E8D5C8;
   box-shadow: 0 8px 24px -4px rgba(46, 32, 25, 0.06);
   border-radius: 1rem;
 }
 
 .glass-panel-interactive {
-  background: #FDF4EC;
+  background: #FFFDFB;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid #EAD5C7;
+  border: 1px solid #E8D5C8;
   transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 8px 24px -4px rgba(46, 32, 25, 0.06);
   border-radius: 1rem;
@@ -49,13 +49,13 @@ h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading {
 
 .card-interactive:hover {
   transform: translateY(-6px) !important;
-  box-shadow: 0 18px 38px -6px rgba(181, 101, 74, 0.25), 0 8px 20px -4px rgba(46, 32, 25, 0.1) !important;
+  box-shadow: 0 18px 38px -6px rgba(181, 101, 74, 0.22), 0 8px 20px -4px rgba(46, 32, 25, 0.1) !important;
   border-color: rgba(181, 101, 74, 0.6) !important;
 }
 
 .card-interactive:hover .icon-badge {
   transform: scale(1.1);
-  background-color: #F9E5DD;
+  background-color: #F7E4DC;
 }
 
 .card-interactive:hover .arrow-icon {
@@ -79,19 +79,19 @@ h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading {
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, #B5654A 0%, #9C4F36 45%, #D98E77 100%);
+  background: linear-gradient(135deg, #B5654A 0%, #3D2B24 55%, #D98E77 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .gradient-text-earth {
-  background: linear-gradient(135deg, #B5654A 0%, #D98E77 60%, #3D2B24 100%);
+  background: linear-gradient(135deg, #3D2B24 0%, #B5654A 60%, #D98E77 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .bg-hero-diagonal {
-  background: linear-gradient(135deg, #FBEFE6 0%, #F8E5DF 50%, #F0C5B7 100%);
+  background: linear-gradient(135deg, #FBEFE6 0%, #F5E4D7 50%, #EBD3C2 100%);
 }
 
 /* Custom Scrollbar */
@@ -105,12 +105,60 @@ h1, h2, h3, h4, h5, h6, .font-heading, .font-serif-heading {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #EAD5C7;
+  background: #ECC5B7;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #B5654A;
 }
+
+/* Gentle Floating Oscillating Animations for Hero Floating Cards */
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-7px); }
+}
+
+@keyframes floatReverse {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(7px); }
+}
+
+.animate-float-1 {
+  animation: floatSlow 3.6s ease-in-out infinite;
+}
+
+.animate-float-2 {
+  animation: floatReverse 4.2s ease-in-out 0.6s infinite;
+}
+
+.animate-float-3 {
+  animation: floatSlow 3.2s ease-in-out 1.2s infinite;
+}
+
+/* Page Load Animations: Navbar Fade Down & Hero Fade Up */
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-down {
+  animation: fadeDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.card-interactive:hover .icon-badge {
+  transform: scale(1.08) rotate(3deg);
+  background-color: #F7E4DC;
+}
+
 
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import ProgressStepper from '../components/ProgressStepper';
+import { getBackendUrl } from '../config/api';
 import { usePrep } from '../context/PrepContext';
 import { useAuth } from '../context/AuthContext';
 import { loadFaceApiModels, analyzeFaceFrame } from '../services/faceDetector';
@@ -25,6 +26,7 @@ import {
   Camera, 
   AlertTriangle,
   Award,
+  UserCheck,
   RefreshCw,
   Eye,
   Square,
@@ -102,6 +104,7 @@ export default function InterviewRoundPage() {
   const [stream, setStream] = useState(null);
   const [cameraPermission, setCameraPermission] = useState('prompt');
   const [permissionError, setPermissionError] = useState('');
+  const [permissionErrorType, setPermissionErrorType] = useState('');
 
   // Questions Bank State
   const [questionsBank, setQuestionsBank] = useState(INITIAL_INTERVIEW_QUESTIONS);
@@ -164,6 +167,7 @@ export default function InterviewRoundPage() {
   const [savedAnswerMetrics, setSavedAnswerMetrics] = useState(null);
 
   const recognitionRef = useRef(null);
+  const transcriptRef = useRef('');
   const answerTimerRef = useRef(null);
   const pauseCheckTimerRef = useRef(null);
 
@@ -275,24 +279,63 @@ export default function InterviewRoundPage() {
     fetchQuestions();
   }, [companyName, resumeQuestions, experienceLevel, targetField, targetFieldId]);
 
-  // 3. MediaStream Permissions (Camera + Mic)
+  // 3. MediaStream Permissions (Camera + Mic) with Fallbacks & Specific Error Classification
   const requestMediaPermissions = async () => {
     setPermissionError('');
+    setPermissionErrorType('');
+    let mediaStream = null;
+
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true
-      });
+      // Step 1: Attempt ideal constraints (1280x720 + audio)
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true
+        });
+      } catch (firstErr) {
+        console.warn('Ideal media constraints failed, attempting basic video+audio:', firstErr.name, firstErr.message);
+
+        // Fallback 1: Basic video + audio (no resolution constraints)
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (secondErr) {
+          console.warn('Basic video+audio failed, attempting video-only:', secondErr.name, secondErr.message);
+
+          // Fallback 2: Video only (in case microphone is unavailable or restricted)
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+      }
+
       setStream(mediaStream);
       setCameraPermission('granted');
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(e => console.warn('Video play notice:', e));
       }
     } catch (err) {
-      console.error('Camera/Mic permission error:', err);
+      console.error('Camera/Mic access error details:', err.name, err.message, err);
       setCameraPermission('denied');
-      setPermissionError('Camera & Microphone access was denied or not found. Please check browser permissions and click Retry.');
+
+      const errName = err.name || '';
+      const errMsg = err.message || '';
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setPermissionErrorType('denied');
+        setPermissionError('Camera & Microphone access was explicitly denied in browser settings. Please grant permissions and click Retry.');
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || errMsg.includes('concurrent') || errMsg.includes('in use')) {
+        setPermissionErrorType('busy');
+        setPermissionError('Camera is in use by another tab or app — close other apps using your camera and retry.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setPermissionErrorType('not_found');
+        setPermissionError('No camera detected — please connect a camera and retry.');
+      } else if (errName === 'OverconstrainedError' || errName === 'ConstraintNotSatisfiedError') {
+        setPermissionErrorType('overconstrained');
+        setPermissionError('Requested camera resolution is not supported by your video device. Click Retry to connect with basic settings.');
+      } else {
+        setPermissionErrorType('other');
+        setPermissionError(`Camera/Microphone initialization issue (${errName || 'Notice'}): ${errMsg || 'Unable to access media stream.'}`);
+      }
     }
   };
 
@@ -300,9 +343,16 @@ export default function InterviewRoundPage() {
     requestMediaPermissions();
     return () => {
       stopSpeech();
-      if (stream) stream.getTracks().forEach(t => t.stop());
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [stream]);
 
   // Synchronize MediaStream to <video> element whenever stream, hasStartedSession, or videoActive changes
   useEffect(() => {
@@ -347,29 +397,27 @@ export default function InterviewRoundPage() {
       recognition.lang = 'en-US'; // Speech-to-Text locked to English
 
       recognition.onresult = (event) => {
-        let finalTranscript = '';
+        let fullTranscript = '';
         let confSum = 0;
         let confCount = 0;
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        for (let i = 0; i < event.results.length; ++i) {
           const seg = event.results[i][0];
           if (seg.confidence && seg.confidence > 0) {
             confSum += seg.confidence;
             confCount++;
           }
-          if (event.results[i].isFinal) {
-            finalTranscript += seg.transcript + ' ';
-          } else {
-            finalTranscript += seg.transcript;
-          }
+          fullTranscript += seg.transcript + ' ';
         }
 
         if (confCount > 0) {
           setLastSegmentConfidence(confSum / confCount);
         }
 
-        if (finalTranscript) {
-          setLiveTranscript(prev => (prev + ' ' + finalTranscript).trim());
+        const cleanTranscript = fullTranscript.trim();
+        if (cleanTranscript) {
+          transcriptRef.current = cleanTranscript;
+          setLiveTranscript(cleanTranscript);
           setLastSpeechTime(Date.now());
         }
       };
@@ -448,6 +496,7 @@ export default function InterviewRoundPage() {
   // Candidate Starts Answer
   const handleStartAnswer = () => {
     stopSpeech();
+    transcriptRef.current = '';
     setLiveTranscript('');
     setSavedAnswerMetrics(null);
     setIsAnswering(true);
@@ -475,7 +524,15 @@ export default function InterviewRoundPage() {
     setAiState('thinking');
     setEvaluatingFollowup(true);
 
-    const userTranscript = liveTranscript.trim() || 'In my previous software engineering projects, I focused on system performance, modular API design, and automated testing.';
+    const capturedText = (transcriptRef.current || liveTranscript).trim();
+
+    console.log('\n=================== [INTERVIEW DEBUG: TECHNICAL ROUND] ===================');
+    console.log('[Interview Debug] Step 1 - Transcript captured:', `"${capturedText}"`);
+    if (!capturedText) {
+      console.warn('[Interview Debug] WARNING: Captured transcript is empty! Mic input may not have registered.');
+    }
+
+    const userTranscript = capturedText || 'In my previous software engineering projects, I focused on system performance, modular API design, and automated testing.';
 
     // 1. Analyze speech metrics & vision telemetry
     const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
@@ -524,61 +581,66 @@ export default function InterviewRoundPage() {
     }
 
     // 3. Call Flask Adaptive Follow-up Endpoint
-    const FLASK_FOLLOWUP_URL = import.meta.env.VITE_FLASK_API_URL
-      ? `${import.meta.env.VITE_FLASK_API_URL}/api/interview-followup`
-      : 'http://localhost:5000/api/interview-followup';
+    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
 
     const nextBankQ = questionsBank[bankQuestionIdx + 1] || questionsBank[0];
+
+    const payload = {
+      selectedCompany: companyName,
+      targetField,
+      experienceLevel: experienceLevel || 'Fresher',
+      experienceYears: experienceYears || '0-2',
+      difficultyLevel: difficultyLevel || 'Medium',
+      selectedLanguage: selectedLanguage?.name || 'English',
+      interviewerPersona: interviewerPersona || 'Friendly',
+      conversationHistory: updatedHistory,
+      topicFollowupCount,
+      nextPlannedQuestion: nextBankQ.question,
+      recentQuestions: questionsBank.map(q => q.question)
+    };
+
+    console.log('[Interview Debug] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedCompany: companyName,
-          targetField,
-          experienceLevel: experienceLevel || 'Fresher',
-          experienceYears: experienceYears || '0-2',
-          difficultyLevel: difficultyLevel || 'Medium',
-          selectedLanguage: selectedLanguage?.name || 'English',
-          interviewerPersona: interviewerPersona || 'Friendly',
-          conversationHistory: updatedHistory,
-          topicFollowupCount,
-          nextPlannedQuestion: nextBankQ.question,
-          recentQuestions: questionsBank.map(q => q.question)
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
+      console.log('[Interview Debug] Step 3 - Gemini response received from backend:', data);
       setAiReasoning(data.reasoning || '');
 
       if (data.action === 'followup') {
         setTopicFollowupCount(prev => prev + 1);
-        setCurrentSpokenQuestion(data.questionText);
+        const nextQText = data.questionText;
+        console.log('[Interview Debug] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', nextQText);
+
+        setCurrentSpokenQuestion(nextQText);
         setCurrentBasedOn('Adaptive AI Probing Follow-Up');
 
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: data.questionText }]);
-        triggerAISpeech(data.questionText);
+        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+        triggerAISpeech(nextQText);
       } else {
-        // Move to next planned question from bank
         const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
         setBankQuestionIdx(nextIdx);
         setTopicFollowupCount(0);
 
         const nextQObj = questionsBank[nextIdx];
-        const nextText = data.questionText || `Moving on to our next topic: ${nextQObj.question}`;
-        
-        setCurrentSpokenQuestion(nextText);
+        const nextQText = data.questionText || `Moving on to our next topic: ${nextQObj.question}`;
+        console.log('[Interview Debug] Step 4 - Rendering & speaking NEXT QUESTION:', nextQText);
+
+        setCurrentSpokenQuestion(nextQText);
         setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
 
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
-        triggerAISpeech(nextText);
+        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+        triggerAISpeech(nextQText);
       }
     } catch (err) {
       console.warn('Follow-up endpoint notice:', err.message);
-      // Fallback: simply advance to next question
       const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
       setBankQuestionIdx(nextIdx);
       setTopicFollowupCount(0);
@@ -768,7 +830,12 @@ export default function InterviewRoundPage() {
                   <Camera className="w-6 h-6" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-sm font-bold font-serif text-earth-cream">Camera & Microphone Access Denied</h3>
+                  <h3 className="text-sm font-bold font-serif text-earth-cream">
+                    {permissionErrorType === 'busy' ? 'Camera is in Use by Another App'
+                     : permissionErrorType === 'not_found' ? 'No Camera Detected'
+                     : permissionErrorType === 'overconstrained' ? 'Camera Resolution Not Supported'
+                     : 'Camera & Microphone Access Denied'}
+                  </h3>
                   <p className="text-xs text-earth-cream/70 leading-relaxed">
                     {permissionError}
                   </p>

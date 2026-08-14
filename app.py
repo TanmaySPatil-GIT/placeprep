@@ -11,7 +11,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS (Allows all origins by default for local & Vercel, or custom ALLOWED_ORIGINS)
+allowed_origins = os.getenv('ALLOWED_ORIGINS', '*').strip()
+if allowed_origins and allowed_origins != '*':
+    origins_list = [o.strip() for o in allowed_origins.split(',') if o.strip()]
+    CORS(app, resources={r"/*": {"origins": origins_list}})
+else:
+    CORS(app)
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
 

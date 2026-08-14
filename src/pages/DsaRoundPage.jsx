@@ -7,7 +7,11 @@ import ProgressStepper from '../components/ProgressStepper';
 import { usePrep } from '../context/PrepContext';
 import { INITIAL_QUESTIONS, seedQuestionsInFirestore } from '../utils/seedQuestions';
 import { INITIAL_ROLE_QUESTIONS } from '../utils/seedRoleQuestions';
-import { executeBatchTestCases } from '../services/judge0';
+import { shuffleArray } from '../utils/shuffle';
+import { executeBatchTestCases } from '../services/codeExecution';
+import { getBackendUrl } from '../config/api';
+import TerminalPanel from '../components/TerminalPanel';
+import CodeComplexityPanel from '../components/CodeComplexityPanel';
 import { 
   Code2, 
   Play, 
@@ -78,6 +82,7 @@ export default function DsaRoundPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executionResult, setExecutionResult] = useState(null);
   const [executionError, setExecutionError] = useState('');
+  const [complexityAnalysisData, setComplexityAnalysisData] = useState(null);
   const [aiCodeEvaluation, setAiCodeEvaluation] = useState(null);
   const [showEvalModal, setShowEvalModal] = useState(false);
 
@@ -191,16 +196,62 @@ export default function DsaRoundPage() {
     setSeeding(false);
   };
 
+  const handleClearTerminal = () => {
+    setExecutionResult(null);
+    setExecutionError('');
+    setComplexityAnalysisData(null);
+  };
+
+  const fetchComplexityAnalysis = async (execRes, currentCode) => {
+    if (!activeQuestion) return null;
+    const FLASK_COMPLEXITY_URL = `${getBackendUrl()}/api/analyze-code-complexity`;
+
+    const numericTime = parseInt(execRes?.executionTimeMs) || 28;
+    let numericMemKb = 14200;
+    if (execRes?.memoryUsed) {
+      const rawMem = parseFloat(execRes.memoryUsed);
+      if (execRes.memoryUsed.includes('MB')) numericMemKb = Math.round(rawMem * 1024);
+      else numericMemKb = Math.round(rawMem);
+    }
+
+    try {
+      const res = await fetch(FLASK_COMPLEXITY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: currentCode || code,
+          language: selectedLanguage,
+          questionId: activeQuestion.id,
+          executionTimeMs: numericTime,
+          memoryUsedKb: numericMemKb,
+          optimalComplexity: activeQuestion.optimalComplexity || 'O(N) time, O(1) space'
+        })
+      });
+      if (res.ok) {
+        const compData = await res.json();
+        setComplexityAnalysisData(compData);
+        return compData;
+      }
+    } catch (err) {
+      console.warn('Complexity analysis notice:', err.message);
+    }
+    return null;
+  };
+
   const handleRunCode = async () => {
     if (!activeQuestion) return;
     setIsRunning(true);
     setExecutionError('');
     setExecutionResult(null);
+    setComplexityAnalysisData(null);
 
     try {
       const casesToRun = activeQuestion.testCases || [{ input: 'Default', expectedOutput: 'Default' }];
       const judgeResult = await executeBatchTestCases({ language: selectedLanguage, sourceCode: code, testCases: casesToRun });
       setExecutionResult(judgeResult);
+      if (judgeResult?.allPassed) {
+        await fetchComplexityAnalysis(judgeResult, code);
+      }
     } catch (err) {
       setExecutionError(err.message || 'Execution failed.');
     } finally {
@@ -220,9 +271,14 @@ export default function DsaRoundPage() {
         setExecutionResult(execRes);
       }
 
+      let compData = complexityAnalysisData;
+      if (execRes?.allPassed && !compData) {
+        compData = await fetchComplexityAnalysis(execRes, code);
+      }
+
       const timeTakenMinutes = Math.max(1, Math.round((Date.now() - questionStartTime) / 60000));
       
-      const FLASK_EVAL_URL = import.meta.env.VITE_FLASK_API_URL ? `${import.meta.env.VITE_FLASK_API_URL}/api/evaluate-code` : 'http://localhost:5000/api/evaluate-code';
+      const FLASK_EVAL_URL = `${getBackendUrl()}/api/evaluate-code`;
       
       let evaluationData = null;
       try {
@@ -241,8 +297,8 @@ export default function DsaRoundPage() {
         evaluationData = {
           correctness: execRes?.allPassed || false,
           correctnessReasoning: "Code executed against test suite.",
-          timeComplexity: activeQuestion.optimalComplexity || "O(N)",
-          spaceComplexity: "O(1)",
+          timeComplexity: compData?.timeComplexity || activeQuestion.optimalComplexity || "O(N)",
+          spaceComplexity: compData?.spaceComplexity || "O(1)",
           missedEdgeCases: ["Check empty inputs", "Handle boundary conditions"],
           codeQualityScore: execRes?.allPassed ? 9 : 6,
           codeQualityReasoning: "Standard algorithmic approach."
@@ -251,12 +307,26 @@ export default function DsaRoundPage() {
 
       setAiCodeEvaluation(evaluationData);
       setShowEvalModal(true);
+
+      const isOpt = compData?.comparedToOptimal?.isOptimal !== false;
       setDsaResult({
         questionId: activeQuestion.id,
         questionTitle: activeQuestion.title,
         difficulty: activeQuestion.difficulty,
         timeTakenMinutes,
-        score: evaluationData.codeQualityScore * 10
+        score: evaluationData.codeQualityScore * 10,
+        executionTimeMs: compData?.executionTimeMs || 28,
+        memoryUsedKb: compData?.memoryUsedKb || 14200,
+        timeComplexity: compData?.timeComplexity || 'O(N)',
+        spaceComplexity: compData?.spaceComplexity || 'O(1)',
+        isOptimal: isOpt,
+        optimalComplexity: activeQuestion.optimalComplexity || 'O(N) time, O(1) space',
+        codeEfficiency: {
+          isOptimal: isOpt,
+          timeComplexity: compData?.timeComplexity || 'O(N)',
+          spaceComplexity: compData?.spaceComplexity || 'O(1)',
+          improvementHint: compData?.comparedToOptimal?.improvementHint || ''
+        }
       });
     } catch (err) {
       setExecutionError('Submission error.');
@@ -485,45 +555,17 @@ export default function DsaRoundPage() {
             </div>
           </div>
 
-          {(executionResult || executionError) && (
-            <div className="border-t border-warmborder bg-mint-50 p-4 space-y-3 font-mono text-xs animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-darkcharcoal-900 font-serif flex items-center gap-1.5">
-                  <Terminal className="w-4 h-4 text-leaf-600" />
-                  Test Suite Execution Results
-                </span>
-                {executionResult && (
-                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                    executionResult.allPassed
-                      ? 'bg-mint-100 text-leaf-600 border-warmborder'
-                      : 'bg-[#FDF3F3] text-[#D32F2F] border-[#F0C2C2]'
-                  }`}>
-                    Passed {executionResult.passedCount} / {executionResult.total}
-                  </span>
-                )}
-              </div>
+          <TerminalPanel
+            isRunning={isRunning}
+            executionResult={executionResult}
+            executionError={executionError}
+            selectedLanguage={selectedLanguage}
+            onRunCode={handleRunCode}
+            onClear={handleClearTerminal}
+          />
 
-              {executionError && (
-                <div className="p-3 rounded-xl bg-[#FDF3F3] border border-[#F0C2C2] text-[#D32F2F] text-xs">
-                  ⚠️ {executionError}
-                </div>
-              )}
-
-              {executionResult?.results?.map((res, i) => (
-                <div key={i} className="p-3 rounded-xl bg-white border border-warmborder space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-darkcharcoal-900">Case {i + 1}: {res.input}</span>
-                    <span className={`font-bold ${res.passed ? 'text-leaf-600' : 'text-[#D32F2F]'}`}>
-                      {res.passed ? '✓ PASSED' : '✗ FAILED'}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-darkcharcoal-500 flex justify-between pt-1">
-                    <span>Expected: {res.expectedOutput}</span>
-                    <span>Output: {res.actualOutput}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+          {complexityAnalysisData && (
+            <CodeComplexityPanel analysisData={complexityAnalysisData} />
           )}
         </div>
       </div>

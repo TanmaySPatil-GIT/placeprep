@@ -9,6 +9,7 @@ import { loadFaceApiModels, analyzeFaceFrame } from '../services/faceDetector';
 import { speakText, stopSpeech, isTTSSupported, getAvailableEnglishVoices } from '../services/speechSynthesizer';
 import { calculateConfidenceScore } from '../utils/confidenceScorer';
 import ProgressStepper from '../components/ProgressStepper';
+import { getBackendUrl } from '../config/api';
 import {
   Mic,
   MicOff,
@@ -72,6 +73,7 @@ export default function HrInterviewRoundPage() {
   const [stream, setStream] = useState(null);
   const [cameraPermission, setCameraPermission] = useState('prompt');
   const [permissionError, setPermissionError] = useState('');
+  const [permissionErrorType, setPermissionErrorType] = useState('');
 
   // Questions Bank State
   const [questionsBank, setQuestionsBank] = useState(INITIAL_HR_QUESTIONS);
@@ -96,6 +98,7 @@ export default function HrInterviewRoundPage() {
   const [longPauseCount, setLongPauseCount] = useState(0);
 
   const recognitionRef = useRef(null);
+  const transcriptRef = useRef('');
   const answerTimerRef = useRef(null);
 
   // 1. Fetch HR Questions
@@ -142,35 +145,80 @@ export default function HrInterviewRoundPage() {
     fetchHrQuestions();
   };
 
-  // 2. MediaStream Permissions (Camera + Mic)
+  // 2. MediaStream Permissions (Camera + Mic) with Fallbacks & Specific Error Classification
   const requestMediaPermissions = async () => {
     setPermissionError('');
+    setPermissionErrorType('');
+    let mediaStream = null;
+
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true
-      });
+      // Step 1: Attempt ideal constraints (1280x720 + audio)
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true
+        });
+      } catch (firstErr) {
+        console.warn('Ideal media constraints failed, attempting basic video+audio:', firstErr.name, firstErr.message);
+
+        // Fallback 1: Basic video + audio (no resolution constraints)
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (secondErr) {
+          console.warn('Basic video+audio failed, attempting video-only:', secondErr.name, secondErr.message);
+
+          // Fallback 2: Video only (in case microphone is unavailable or restricted)
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+      }
+
       setStream(mediaStream);
       setCameraPermission('granted');
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
+        videoRef.current.play().catch(e => console.warn('Video play notice:', e));
       }
     } catch (err) {
-      console.warn('Media permission error:', err);
+      console.error('Camera/Mic access error details:', err.name, err.message, err);
       setCameraPermission('denied');
-      setPermissionError(err.message || 'Camera/Microphone access denied.');
+
+      const errName = err.name || '';
+      const errMsg = err.message || '';
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setPermissionErrorType('denied');
+        setPermissionError('Camera & Microphone access was explicitly denied in browser settings. Please grant permissions and click Retry.');
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || errMsg.includes('concurrent') || errMsg.includes('in use')) {
+        setPermissionErrorType('busy');
+        setPermissionError('Camera is in use by another tab or app — close other apps using your camera and retry.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setPermissionErrorType('not_found');
+        setPermissionError('No camera detected — please connect a camera and retry.');
+      } else if (errName === 'OverconstrainedError' || errName === 'ConstraintNotSatisfiedError') {
+        setPermissionErrorType('overconstrained');
+        setPermissionError('Requested camera resolution is not supported by your video device. Click Retry to connect with basic settings.');
+      } else {
+        setPermissionErrorType('other');
+        setPermissionError(`Camera/Microphone initialization issue (${errName || 'Notice'}): ${errMsg || 'Unable to access media stream.'}`);
+      }
     }
   };
 
   useEffect(() => {
     requestMediaPermissions();
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
       stopSpeech();
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [stream]);
 
   // Synchronize MediaStream to <video> element whenever stream, hasStartedSession, or videoActive changes
   useEffect(() => {
@@ -196,14 +244,14 @@ export default function HrInterviewRoundPage() {
       recognition.lang = 'en-US'; // Speech-to-Text locked to English
 
       recognition.onresult = (event) => {
-        let finalTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript + ' ';
-          }
+        let fullTranscript = '';
+        for (let i = 0; i < event.results.length; ++i) {
+          fullTranscript += event.results[i][0].transcript + ' ';
         }
-        if (finalTranscript.trim()) {
-          setLiveTranscript(prev => (prev + ' ' + finalTranscript).trim());
+        const clean = fullTranscript.trim();
+        if (clean) {
+          transcriptRef.current = clean;
+          setLiveTranscript(clean);
         }
       };
 
@@ -237,6 +285,7 @@ export default function HrInterviewRoundPage() {
 
   const handleStartAnswer = () => {
     stopSpeech();
+    transcriptRef.current = '';
     setIsAnswering(true);
     setLiveTranscript('');
     setAnswerDuration(0);
@@ -260,7 +309,15 @@ export default function HrInterviewRoundPage() {
 
     setAiState('thinking');
 
-    const userTranscript = liveTranscript.trim() || "I focus on open communication, active listening, and aligning team priorities with project milestones.";
+    const capturedText = (transcriptRef.current || liveTranscript).trim();
+
+    console.log('\n=================== [INTERVIEW DEBUG: HR ROUND] ===================');
+    console.log('[Interview Debug: HR] Step 1 - Transcript captured:', `"${capturedText}"`);
+    if (!capturedText) {
+      console.warn('[Interview Debug: HR] WARNING: Captured transcript is empty! Mic input may not have registered.');
+    }
+
+    const userTranscript = capturedText || "I focus on open communication, active listening, and aligning team priorities with project milestones.";
     
     const updatedHistory = [
       ...conversationHistory,
@@ -295,45 +352,66 @@ export default function HrInterviewRoundPage() {
       visionSummary: { gazeRatio: 90, faceRatio: 95 }
     });
 
-    const FLASK_FOLLOWUP_URL = import.meta.env.VITE_FLASK_API_URL
-      ? `${import.meta.env.VITE_FLASK_API_URL}/api/interview-followup`
-      : 'http://localhost:5000/api/interview-followup';
+    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
 
     const nextBankQ = questionsBank[questionIdx + 1] || questionsBank[0];
+
+    const payload = {
+      selectedCompany: companyName,
+      targetField,
+      interviewType: 'hr',
+      difficultyLevel: difficultyLevel || 'Medium',
+      selectedLanguage: selectedLanguage?.name || 'English',
+      interviewerPersona: interviewerPersona || 'Friendly',
+      conversationHistory: updatedHistory,
+      topicFollowupCount,
+      nextPlannedQuestion: nextBankQ.question,
+      recentQuestions: questionsBank.map(q => q.question)
+    };
+
+    console.log('[Interview Debug: HR] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedCompany: companyName,
-          targetField,
-          interviewType: 'hr',
-          difficultyLevel: difficultyLevel || 'Medium',
-          selectedLanguage: selectedLanguage?.name || 'English',
-          interviewerPersona: interviewerPersona || 'Friendly',
-          conversationHistory: updatedHistory,
-          topicFollowupCount,
-          nextPlannedQuestion: nextBankQ.question,
-          recentQuestions: questionsBank.map(q => q.question)
-        })
+        body: JSON.stringify(payload)
       });
 
       if (response.ok) {
         const data = await response.json();
+        console.log('[Interview Debug: HR] Step 3 - Gemini response received:', data);
+
         if (data.action === 'followup' && topicFollowupCount < 2) {
           setTopicFollowupCount(prev => prev + 1);
-          setCurrentSpokenQuestion(data.questionText);
-          setConversationHistory(prev => [...prev, { role: 'interviewer', text: data.questionText }]);
-          triggerAISpeech(data.questionText);
+          const nextQText = data.questionText;
+          console.log('[Interview Debug: HR] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', nextQText);
+
+          setCurrentSpokenQuestion(nextQText);
+          setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+          triggerAISpeech(nextQText);
           return;
+        } else if (data.questionText) {
+          // Adaptive next question transition from Gemini
+          const nextIdx = questionIdx + 1;
+          if (nextIdx < questionsBank.length) {
+            setQuestionIdx(nextIdx);
+            setTopicFollowupCount(0);
+            const nextQText = data.questionText;
+            console.log('[Interview Debug: HR] Step 4 - Rendering & speaking ADAPTIVE NEXT QUESTION:', nextQText);
+
+            setCurrentSpokenQuestion(nextQText);
+            setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+            triggerAISpeech(nextQText);
+            return;
+          }
         }
       }
     } catch (err) {
       console.warn('HR follow-up endpoint notice:', err.message);
     }
 
-    // Default progression
+    // Default progression fallback
     if (questionIdx < questionsBank.length - 1) {
       const nextIdx = questionIdx + 1;
       setQuestionIdx(nextIdx);

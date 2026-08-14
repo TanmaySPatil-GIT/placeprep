@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ProgressStepper from '../components/ProgressStepper';
+import { getBackendUrl } from '../config/api';
 import { usePrep } from '../context/PrepContext';
 import { useAuth } from '../context/AuthContext';
 import { speakText, stopSpeech, isTTSSupported } from '../services/speechSynthesizer';
@@ -21,6 +22,7 @@ import {
   AlertCircle,
   Bot,
   Brain,
+  UserCheck,
   Loader2
 } from 'lucide-react';
 
@@ -154,9 +156,7 @@ export default function NegotiationRoundPage() {
     const nextExchangeCount = exchangeCount + 1;
     setExchangeCount(nextExchangeCount);
 
-    const FLASK_NEGOTIATION_URL = import.meta.env.VITE_FLASK_API_URL
-      ? `${import.meta.env.VITE_FLASK_API_URL}/api/negotiation-response`
-      : 'http://localhost:5000/api/negotiation-response';
+    const FLASK_NEGOTIATION_URL = `${getBackendUrl()}/api/negotiation-response`;
 
     try {
       const response = await fetch(FLASK_NEGOTIATION_URL, {

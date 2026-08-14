@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePrep } from '../context/PrepContext';
 import { INITIAL_COURSE_CATALOG, seedCourseCatalogInFirestore } from '../utils/seedCourseCatalog';
+import { getBackendUrl } from '../config/api';
 import { 
   BookOpen, 
   Sparkles, 
@@ -95,9 +96,7 @@ export default function RecommendationsPage() {
       const candidateCatalog = fieldCatalog.length > 0 ? fieldCatalog : catalogPool;
 
       // Step 2: Call Flask Hybrid Recommendation Endpoint
-      const FLASK_RECS_URL = import.meta.env.VITE_FLASK_API_URL
-        ? `${import.meta.env.VITE_FLASK_API_URL}/api/recommendations`
-        : 'http://localhost:5000/api/recommendations';
+      const FLASK_RECS_URL = `${getBackendUrl()}/api/recommendations`;
 
       const payload = {
         fieldId,

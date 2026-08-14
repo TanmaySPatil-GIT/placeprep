@@ -1,6 +1,10 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import PlacementReadinessSection from '../components/PlacementReadinessSection';
+import StatsStripSection from '../components/StatsStripSection';
+import PlacementCoachSection from '../components/PlacementCoachSection';
+import TopCompaniesSection from '../components/TopCompaniesSection';
 import { 
   Target, 
   Code2, 
@@ -14,7 +18,9 @@ import {
   Zap,
   ChevronRight,
   Sparkles,
-  CheckCircle2
+  CheckCircle2,
+  Brain,
+  FileText
 } from 'lucide-react';
 
 export default function LandingPage({ onOpenAuthModal }) {
@@ -43,7 +49,7 @@ export default function LandingPage({ onOpenAuthModal }) {
         <div className="absolute -bottom-16 -left-16 w-96 h-96 rounded-full bg-espresso-900/10 blur-2xl pointer-events-none" />
 
         {/* Soft Arch / Rainbow Line-Art Graphic Overlay */}
-        <div className="absolute top-4 right-10 opacity-25 pointer-events-none hidden lg:block">
+        <div className="absolute top-4 right-10 opacity-30 pointer-events-none hidden lg:block">
           <svg width="220" height="220" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M 20 180 A 80 80 0 0 1 180 180" stroke="#B5654A" strokeWidth="2.5" strokeDasharray="4 4" />
             <path d="M 40 180 A 60 60 0 0 1 160 180" stroke="#D98E77" strokeWidth="2" />
@@ -54,7 +60,7 @@ export default function LandingPage({ onOpenAuthModal }) {
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center px-6 sm:px-12 py-16 sm:py-24 max-w-7xl mx-auto">
           
           {/* Hero Left Content (7 cols) */}
-          <div className="lg:col-span-7 space-y-7 text-left">
+          <div className="lg:col-span-7 space-y-7 text-left animate-fade-up">
             
             {/* Color-Block Header Badge */}
             <div className="flex items-center gap-3">
@@ -65,13 +71,14 @@ export default function LandingPage({ onOpenAuthModal }) {
             </div>
 
             {/* Headline */}
-            <h1 className="font-serif text-4xl sm:text-6xl font-bold tracking-tight text-warmtext-900 leading-[1.14]">
-              Crack Enterprise Drives with <span className="gradient-text">Real-Time Skill Evaluation</span>
+            <h1 className="font-heading text-4xl sm:text-6xl font-extrabold tracking-tight text-warmtext-900 leading-[1.14]">
+              Prepare Smarter.<br />
+              <span className="gradient-text">Get Placed Faster.</span>
             </h1>
 
             {/* Body Text */}
             <p className="text-base sm:text-lg text-warmtext-500 max-w-xl leading-relaxed font-sans">
-              PlacePrep is an end-to-end placement preparation platform combining ATS resume audits, aptitude rounds, conversational voice mock interviews, and verified skill catalog recommendations.
+              AI-powered placement preparation platform combining resume audits, aptitude rounds, mock interviews, and skill tracking.
             </p>
 
             {/* CTA Buttons */}
@@ -105,63 +112,70 @@ export default function LandingPage({ onOpenAuthModal }) {
 
           </div>
 
-          {/* Hero Right Side: Layered Floating Card Overlay */}
-          <div className="lg:col-span-5 relative flex items-center justify-center min-h-[340px]">
+          {/* Hero Right Side: 3 Separate Layered Floating Cards */}
+          <div className="lg:col-span-5 relative flex items-center justify-center min-h-[380px] w-full py-4">
             
-            {/* Main Base Card Graphic with Rust Left Border Accent */}
-            <div className="w-full max-w-sm bg-[#FDF4EC] rounded-xl p-6 border border-warmborder border-l-4 border-l-rust-500 shadow-warm-md space-y-4">
-              <div className="flex items-center justify-between border-b border-warmborder pb-3">
+            {/* Card 1: Main Primary Placement Score Card (Center) */}
+            <div className="w-full max-w-[310px] bg-[#FFFDFB] rounded-2xl p-5 border border-warmborder border-l-4 border-l-rust-500 shadow-warm-lg space-y-3.5 animate-float-1 relative z-20">
+              <div className="flex items-center justify-between border-b border-warmborder/80 pb-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-lg bg-rust-100 text-rust-500 border border-warmborder flex items-center justify-center font-bold font-serif text-sm">
+                  <div className="w-9 h-9 rounded-xl bg-rust-100 text-rust-500 border border-warmborder flex items-center justify-center font-bold text-sm">
                     <Target className="w-4 h-4 text-rust-500" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold font-serif text-warmtext-900">Enterprise Hiring Signal</h4>
-                    <span className="text-[10px] text-warmtext-500">Google & Amazon Track</span>
+                    <h4 className="text-xs font-bold font-heading text-warmtext-900">Placement Score</h4>
+                    <span className="text-[10px] text-warmtext-500 font-sans">Enterprise Diagnostic</span>
                   </div>
                 </div>
-                <span className="px-3 py-1 rounded-full text-[10px] font-extrabold bg-dustyrose-100 text-dustyrose-700 border border-dustyrose-200">
-                  92% Match
-                </span>
-              </div>
-
-              {/* Metric Row */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="p-3 rounded-lg bg-rust-50 border border-warmborder space-y-1">
-                  <span className="text-[10px] text-warmtext-500 font-mono">DSA Proficiency</span>
-                  <div className="font-bold text-rust-500 font-mono text-sm">94 / 100</div>
-                </div>
-                <div className="p-3 rounded-lg bg-dustyrose-100 border border-dustyrose-200 space-y-1">
-                  <span className="text-[10px] text-warmtext-500 font-mono">Voice Composure</span>
-                  <div className="font-bold text-dustyrose-600 font-mono text-sm">88 / 100</div>
+                <div className="text-right">
+                  <div className="text-lg font-extrabold text-rust-500 font-mono">87 / 100</div>
+                  <span className="text-[9px] text-dustyrose-600 font-bold uppercase font-mono">Top Tier</span>
                 </div>
               </div>
 
               {/* Progress Bar */}
-              <div className="space-y-1.5 pt-1">
-                <div className="flex justify-between text-[11px] font-semibold text-warmtext-700">
-                  <span>Placement Readiness Score</span>
-                  <span className="font-mono text-rust-500">Level 4</span>
+              <div className="space-y-1.5 pt-0.5">
+                <div className="flex justify-between text-[11px] font-bold text-warmtext-700">
+                  <span className="font-heading">Placement Readiness</span>
+                  <span className="font-mono text-rust-500">87%</span>
                 </div>
-                <div className="w-full bg-peach-200 rounded-full h-2 overflow-hidden">
-                  <div className="bg-rust-500 h-full rounded-full" style={{ width: '88%' }}></div>
-                </div>
-              </div>
-
-              {/* Floating Overlay Badge Card */}
-              <div className="absolute -bottom-4 -right-2 bg-[#FDF4EC] rounded-xl px-4 py-2.5 border border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-md flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-full bg-rust-500 text-white flex items-center justify-center font-extrabold text-xs shadow-glow-rust">
-                  ✓
-                </div>
-                <div className="text-left">
-                  <div className="text-[11px] font-bold text-warmtext-900 font-serif">Verified Assessment</div>
-                  <div className="text-[9px] text-dustyrose-600 font-semibold font-mono">Top 5% Peer Leaderboard</div>
+                <div className="w-full bg-peach-200 rounded-full h-2.5 overflow-hidden">
+                  <div className="bg-rust-500 h-full rounded-full transition-all duration-500" style={{ width: '87%' }} />
                 </div>
               </div>
             </div>
+
+            {/* Card 2: Smaller Offset Top-Right Badge (92% Match) */}
+            <div className="absolute -top-1 right-0 sm:right-2 bg-[#FFFDFB] rounded-xl px-4 py-2.5 border border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-lg flex items-center gap-3 animate-float-2 z-30">
+              <div className="w-8 h-8 rounded-full bg-dustyrose-100 text-dustyrose-600 flex items-center justify-center font-extrabold text-xs shadow-warm-sm border border-dustyrose-200 shrink-0">
+                <Trophy className="w-4 h-4 text-dustyrose-600" />
+              </div>
+              <div className="text-left min-w-[110px]">
+                <div className="text-xs font-extrabold text-warmtext-900 font-heading">92% Match</div>
+                <div className="text-[10px] text-dustyrose-700 font-semibold font-mono">Google & Amazon Track</div>
+              </div>
+            </div>
+
+            {/* Card 3: Smaller Offset Bottom-Left Badge (Resume ATS Score 94%) */}
+            <div className="absolute -bottom-2 left-0 sm:left-2 bg-[#FFFDFB] rounded-xl px-4 py-2.5 border border-warmborder border-l-4 border-l-espresso-500 shadow-warm-lg flex items-center gap-3 animate-float-3 z-30">
+              <div className="w-8 h-8 rounded-full bg-espresso-100 text-espresso-700 flex items-center justify-center font-extrabold text-xs shadow-warm-sm border border-espresso-200 shrink-0">
+                <Sparkles className="w-4 h-4 text-espresso-700" />
+              </div>
+              <div className="text-left min-w-[130px]">
+                <div className="text-xs font-extrabold text-warmtext-900 font-heading">Resume ATS 94%</div>
+                <div className="text-[10px] text-warmtext-500 font-semibold font-mono">Keyword Audit Verified</div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
+
+      {/* SIGNATURE SECTION: YOUR PLACEMENT READINESS */}
+      <PlacementReadinessSection onOpenAuthModal={onOpenAuthModal} />
+
+      {/* ANIMATED HORIZONTAL STATS STRIP SECTION */}
+      <StatsStripSection />
 
       {/* 2. FEATURE STRIP (ICON ROW SECTION) */}
       <section className="relative rounded-[28px] p-8 sm:p-12 bg-[#FDF4EC] border border-warmborder shadow-warm-sm">
@@ -209,134 +223,146 @@ export default function LandingPage({ onOpenAuthModal }) {
         </div>
       </section>
 
-      {/* 3. CARD GRID SECTION WITH DIAMOND SPARKLE SECTION HEADER & THIN DIVIDER LINE */}
+      {/* 3. "PREPARE FOR EVERY ROUND" CORE PREP CARDS SECTION */}
       <section className="space-y-8 max-w-7xl mx-auto">
-        <div className="text-center space-y-3 pb-2 border-b border-dustyrose-200 max-w-2xl mx-auto">
-          <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rust-500 text-white text-xs font-extrabold uppercase tracking-wider">
-            <span>✦</span>
-            <span>End-to-End Placement Architecture</span>
+        <div className="space-y-4 max-w-3xl mx-auto text-center">
+          <div className="flex items-center justify-center gap-3">
+            <div className="h-px bg-rust-400/40 flex-1 max-w-[80px]" />
+            <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-rust-500 text-[#FFF9F4] text-xs font-bold uppercase tracking-wider shadow-warm-sm">
+              <span>✦</span>
+              <span>Selection Rounds</span>
+            </div>
+            <div className="h-px bg-rust-400/40 flex-1 max-w-[80px]" />
           </div>
-          <h2 className="text-3xl sm:text-4xl font-bold font-serif text-warmtext-900 flex items-center justify-center gap-2">
-            <span>Comprehensive Hiring Simulator</span>
-            <span className="text-rust-500 text-2xl">✧</span>
+
+          <h2 className="text-3xl sm:text-4xl font-extrabold font-serif text-[#FFF9F4] flex items-center justify-center gap-3 tracking-tight">
+            <span>Prepare for Every Round</span>
+            <span className="text-rust-400 text-xl font-sans">✧</span>
           </h2>
-          <p className="text-xs sm:text-sm text-warmtext-500 max-w-xl mx-auto">
-            Experience authentic enterprise selection rounds with real-time diagnostic feedback at every stage.
-          </p>
+
+          <div className="flex items-center gap-4 max-w-lg mx-auto">
+            <div className="h-px bg-[#E8D9CE]/30 flex-1" />
+            <p className="text-xs sm:text-sm text-[#E8D9CE] font-sans">
+              Authentic enterprise selection filters with real-time AI diagnostic feedback
+            </p>
+            <div className="h-px bg-[#E8D9CE]/30 flex-1" />
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           
-          {/* Card 1: Target Company Selection */}
+          {/* Card 1: Aptitude */}
           <div 
-            onClick={() => navigate('/companies')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-rust-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
+            onClick={() => navigate('/round/aptitude')}
+            className="card-interactive bg-[#FDF4EC] rounded-xl p-6 sm:p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-rust-500 shadow-warm-sm space-y-6 relative min-h-[280px] cursor-pointer group"
           >
             <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-rust-100 text-rust-500 flex items-center justify-center border border-warmborder shadow-warm-sm">
-                <Building2 className="w-6 h-6 text-rust-500" />
+              <div className="flex items-center justify-between">
+                <div className="icon-badge w-12 h-12 rounded-lg bg-rust-100 text-rust-500 flex items-center justify-center border border-warmborder shadow-warm-sm">
+                  <Brain className="w-6 h-6 text-rust-500" />
+                </div>
+                <span className="text-[10px] font-mono font-extrabold px-2.5 py-1 rounded-full bg-peach-100 border border-warmborder text-warmtext-700">
+                  Round 1
+                </span>
               </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-rust-500 transition-colors">Target Company Selection</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">Choose from 20+ enterprise recruiters to load authentic hiring rounds.</p>
+              <div className="space-y-1.5">
+                <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-rust-500 transition-colors">Aptitude</h3>
+                <p className="text-[11px] font-mono font-bold text-rust-500">50+ Seeded Questions • 4 Sections</p>
+              </div>
+              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">Quantitative speed, logical reasoning, verbal ability, and general awareness tests.</p>
             </div>
             <div className="pt-2 text-xs font-bold text-rust-500 flex items-center gap-1.5 group-hover:text-rust-600">
-              <span className="link-text">Explore Company Tracks</span>
+              <span className="link-text">Start Practice</span>
               <ChevronRight className="arrow-icon w-4 h-4" />
             </div>
           </div>
 
-          {/* Card 2: Code Execution */}
+          {/* Card 2: Technical */}
           <div 
-            onClick={() => navigate('/companies')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
+            onClick={() => navigate('/round/dsa')}
+            className="card-interactive bg-[#FDF4EC] rounded-xl p-6 sm:p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm space-y-6 relative min-h-[280px] cursor-pointer group"
           >
             <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-dustyrose-100 text-dustyrose-600 flex items-center justify-center border border-dustyrose-200 shadow-warm-sm">
-                <Code2 className="w-6 h-6 text-dustyrose-600" />
+              <div className="flex items-center justify-between">
+                <div className="icon-badge w-12 h-12 rounded-lg bg-dustyrose-100 text-dustyrose-600 flex items-center justify-center border border-dustyrose-200 shadow-warm-sm">
+                  <Code2 className="w-6 h-6 text-dustyrose-600" />
+                </div>
+                <span className="text-[10px] font-mono font-extrabold px-2.5 py-1 rounded-full bg-peach-100 border border-warmborder text-warmtext-700">
+                  Round 2
+                </span>
               </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-dustyrose-600 transition-colors">Code Execution</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">Solve time-bound algorithmic challenges in a professional IDE.</p>
+              <div className="space-y-1.5">
+                <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-dustyrose-600 transition-colors">Technical</h3>
+                <p className="text-[11px] font-mono font-bold text-dustyrose-600">1,200+ Questions • 15 Topics</p>
+              </div>
+              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">Algorithmic DSA problems, Technical MCQs, machine coding, and system architecture.</p>
             </div>
             <div className="pt-2 text-xs font-bold text-dustyrose-600 flex items-center gap-1.5 group-hover:text-dustyrose-700">
-              <span className="link-text">Launch Environment</span>
+              <span className="link-text">Start Practice</span>
               <ChevronRight className="arrow-icon w-4 h-4" />
             </div>
           </div>
 
-          {/* Card 3: Speech & Pace Analytics */}
+          {/* Card 3: Resume */}
           <div 
-            onClick={() => navigate('/companies')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-rust-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
+            onClick={() => navigate('/resume')}
+            className="card-interactive bg-[#FDF4EC] rounded-xl p-6 sm:p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-espresso-500 shadow-warm-sm space-y-6 relative min-h-[280px] cursor-pointer group"
           >
             <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-rust-100 text-rust-500 flex items-center justify-center border border-warmborder shadow-warm-sm">
-                <Video className="w-6 h-6 text-rust-500" />
+              <div className="flex items-center justify-between">
+                <div className="icon-badge w-12 h-12 rounded-lg bg-espresso-100 text-espresso-700 flex items-center justify-center border border-espresso-100 shadow-warm-sm">
+                  <FileText className="w-6 h-6 text-espresso-700" />
+                </div>
+                <span className="text-[10px] font-mono font-extrabold px-2.5 py-1 rounded-full bg-peach-100 border border-warmborder text-warmtext-700">
+                  Audit
+                </span>
               </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-rust-500 transition-colors">Speech & Pace Analytics</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">Real-time speech pacing analysis tracking words-per-minute.</p>
-            </div>
-            <div className="pt-2 text-xs font-bold text-rust-500 flex items-center gap-1.5 group-hover:text-rust-600">
-              <span className="link-text">View Speech Metrics</span>
-              <ChevronRight className="arrow-icon w-4 h-4" />
-            </div>
-          </div>
-
-          {/* Card 4: Vision Gaze Telemetry */}
-          <div 
-            onClick={() => navigate('/companies')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-espresso-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
-          >
-            <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-espresso-100 text-espresso-700 flex items-center justify-center border border-espresso-100 shadow-warm-sm">
-                <Eye className="w-6 h-6 text-espresso-700" />
+              <div className="space-y-1.5">
+                <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-espresso-700 transition-colors">Resume</h3>
+                <p className="text-[11px] font-mono font-bold text-espresso-700">ATS Keyword Match • 20+ Recruiters</p>
               </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-espresso-700 transition-colors">Vision Gaze Telemetry</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">WebCam tracking to evaluate interview eye-contact ratio.</p>
+              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">ATS optical parser audit, impact sentence re-writing, and personalized resume questions.</p>
             </div>
             <div className="pt-2 text-xs font-bold text-espresso-700 flex items-center gap-1.5 group-hover:text-espresso-900">
-              <span className="link-text">Inspect Tracking</span>
+              <span className="link-text">Start Practice</span>
               <ChevronRight className="arrow-icon w-4 h-4" />
             </div>
           </div>
 
-          {/* Card 5: Executive Diagnostic Report */}
+          {/* Card 4: Interview */}
           <div 
-            onClick={() => navigate('/dashboard')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-rust-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
+            onClick={() => navigate('/round/interview')}
+            className="card-interactive bg-[#FDF4EC] rounded-xl p-6 sm:p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-rust-500 shadow-warm-sm space-y-6 relative min-h-[280px] cursor-pointer group"
           >
             <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-rust-100 text-rust-500 flex items-center justify-center border border-warmborder shadow-warm-sm">
-                <BarChart3 className="w-6 h-6 text-rust-500" />
+              <div className="flex items-center justify-between">
+                <div className="icon-badge w-12 h-12 rounded-lg bg-rust-100 text-rust-500 flex items-center justify-center border border-warmborder shadow-warm-sm">
+                  <Video className="w-6 h-6 text-rust-500" />
+                </div>
+                <span className="text-[10px] font-mono font-extrabold px-2.5 py-1 rounded-full bg-peach-100 border border-warmborder text-warmtext-700">
+                  Final AI Mock
+                </span>
               </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-rust-500 transition-colors">Executive Diagnostic Report</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans font-medium">Instant feedback with score gauges and skill gap analysis.</p>
+              <div className="space-y-1.5">
+                <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-rust-500 transition-colors">Interview</h3>
+                <p className="text-[11px] font-mono font-bold text-rust-500">Real-time Telemetry • STAR Audio</p>
+              </div>
+              <p className="text-xs text-warmtext-500 leading-relaxed font-sans">AI voice mock screens tracking speech pace (WPM), filler words, and facial composure.</p>
             </div>
             <div className="pt-2 text-xs font-bold text-rust-500 flex items-center gap-1.5 group-hover:text-rust-600">
-              <span className="link-text">View Sample Diagnostics</span>
-              <ChevronRight className="arrow-icon w-4 h-4" />
-            </div>
-          </div>
-
-          {/* Card 6: Peer Benchmarks */}
-          <div 
-            onClick={() => navigate('/dashboard')}
-            className="card-interactive bg-[#FDF4EC] rounded-xl p-8 flex flex-col justify-between border border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm space-y-6 relative min-h-[260px] cursor-pointer group"
-          >
-            <div className="space-y-4">
-              <div className="icon-badge w-12 h-12 rounded-lg bg-dustyrose-100 text-dustyrose-600 flex items-center justify-center border border-dustyrose-200 shadow-warm-sm">
-                <Trophy className="w-6 h-6 text-dustyrose-600" />
-              </div>
-              <h3 className="text-2xl font-bold font-serif text-warmtext-900 leading-snug group-hover:text-dustyrose-600 transition-colors">Peer Benchmarks</h3>
-              <p className="text-xs text-warmtext-500 leading-relaxed font-sans font-medium">Benchmark your readiness against verified engineering candidate leaderboards.</p>
-            </div>
-            <div className="pt-2 text-xs font-bold text-dustyrose-600 flex items-center gap-1.5 group-hover:text-dustyrose-700">
-              <span className="link-text">View Rankings</span>
+              <span className="link-text">Start Practice</span>
               <ChevronRight className="arrow-icon w-4 h-4" />
             </div>
           </div>
 
         </div>
       </section>
+
+      {/* DYNAMIC PERSONAL PLACEMENT COACH SECTION */}
+      <PlacementCoachSection />
+
+      {/* MONOCHROME TOP COMPANIES HIRING SECTION */}
+      <TopCompaniesSection />
 
       {/* 4. PROMINENT BOTTOM CTA SECTION WITH OVERLAPPING CIRCLES */}
       <section className="rounded-[28px] p-8 sm:p-12 text-center space-y-6 max-w-4xl mx-auto bg-peach-50 border border-warmborder shadow-warm-md relative overflow-hidden">

@@ -2,6 +2,7 @@
  * Resume Analysis Service
  * Communicates with backend Flask API endpoints for resume analysis and question generation.
  */
+import { getBackendUrl } from '../config/api';
 
 export async function analyzeResumeApi(file, targetField = 'Software Development', companyName = 'Google', options = {}) {
   if (!file) {
@@ -26,9 +27,7 @@ export async function analyzeResumeApi(file, targetField = 'Software Development
     formData.append('require_target_field', 'true');
   }
 
-  const FLASK_RESUME_URL = import.meta.env.VITE_FLASK_API_URL
-    ? `${import.meta.env.VITE_FLASK_API_URL}/api/analyze-resume`
-    : 'http://localhost:5000/api/analyze-resume';
+  const FLASK_RESUME_URL = `${getBackendUrl()}/api/analyze-resume`;
 
   const response = await fetch(FLASK_RESUME_URL, {
     method: 'POST',
@@ -45,9 +44,7 @@ export async function analyzeResumeApi(file, targetField = 'Software Development
 }
 
 export async function generateResumeQuestionsApi(extractedProfile, companyName = 'Google', targetField = 'Software Development') {
-  const FLASK_QUESTIONS_URL = import.meta.env.VITE_FLASK_API_URL
-    ? `${import.meta.env.VITE_FLASK_API_URL}/api/generate-resume-interview-questions`
-    : 'http://localhost:5000/api/generate-resume-interview-questions';
+  const FLASK_QUESTIONS_URL = `${getBackendUrl()}/api/generate-resume-interview-questions`;
 
   const response = await fetch(FLASK_QUESTIONS_URL, {
     method: 'POST',

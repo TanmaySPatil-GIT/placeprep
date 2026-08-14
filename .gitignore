@@ -26,3 +26,12 @@ dist-ssr
 # Environment variables — never commit secrets
 .env
 .env.*
+
+# Python / Flask backend
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+.venv/
+*.egg-info/

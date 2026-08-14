@@ -21,7 +21,8 @@ import {
   Upload, 
   Loader2,
   AlertCircle,
-  School
+  School,
+  Target
 } from 'lucide-react';
 
 export default function OnboardingPage() {

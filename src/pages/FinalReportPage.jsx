@@ -9,6 +9,7 @@ import { usePrep } from '../context/PrepContext';
 import { calculateAggregateCommunicationScore } from '../services/speechAnalyzer';
 import { generateSessionEmotionTimeline } from '../services/faceDetector';
 import { INITIAL_COURSE_CATALOG } from '../utils/seedCourseCatalog';
+import { getBackendUrl } from '../config/api';
 import { 
   Award, 
   Sparkles, 
@@ -324,9 +325,7 @@ export default function FinalReportPage() {
     const generateReport = async () => {
       setLoading(true);
 
-      const FLASK_URL = import.meta.env.VITE_FLASK_API_URL
-        ? `${import.meta.env.VITE_FLASK_API_URL}/api/generate-final-report`
-        : 'http://localhost:5000/api/generate-final-report';
+      const FLASK_URL = `${getBackendUrl()}/api/generate-final-report`;
 
       const payload = {
         userProfile: userProfile || { displayName: currentUser?.email || 'Candidate' },

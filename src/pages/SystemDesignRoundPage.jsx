@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ProgressStepper from '../components/ProgressStepper';
+import { getBackendUrl } from '../config/api';
 import { usePrep } from '../context/PrepContext';
 import { useAuth } from '../context/AuthContext';
 import { speakText, stopSpeech } from '../services/speechSynthesizer';
@@ -244,9 +245,7 @@ export default function SystemDesignRoundPage() {
     setEvaluating(true);
     const combinedApproach = (textApproach + (liveTranscript ? '\n\n' + liveTranscript : '')).trim();
 
-    const FLASK_SD_URL = import.meta.env.VITE_FLASK_API_URL
-      ? `${import.meta.env.VITE_FLASK_API_URL}/api/evaluate-system-design`
-      : 'http://localhost:5000/api/evaluate-system-design';
+    const FLASK_SD_URL = `${getBackendUrl()}/api/evaluate-system-design`;
 
     try {
       const response = await fetch(FLASK_SD_URL, {

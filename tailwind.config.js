@@ -9,142 +9,143 @@ export default {
     extend: {
       colors: {
         peach: {
-          50: '#FBEFE6',   // base warm peach / blush cream page background
-          100: '#F8E5DF',  // soft peach card surface
-          200: '#EAD5C7',  // peach border
-          card: '#FDF4EC', // warm blush-cream card surface
+          50: '#FBEFE6',   // base warm peach/blush cream background
+          100: '#F5E4D7',  // soft peach surface
+          200: '#EBD3C2',  // peach border
+          card: '#FFFDFB', // cream/white card surface
         },
         rust: {
           50: '#FDF5F2',
-          100: '#F9E5DD',
-          200: '#F0C5B7',
-          400: '#CA7B61',
-          500: '#B5654A',  // primary deep rust / terracotta
-          600: '#9C4F36',  // deep rust hover
-          700: '#823C27',  // dark terracotta text
-          900: '#3D2B24',
+          100: '#F7E4DC',
+          200: '#ECC5B7',
+          400: '#C9775C',
+          500: '#B5654A',  // primary deep rust / terracotta accent
+          600: '#9E5239',  // rust hover
+          700: '#84412B',  // dark rust text
+          900: '#4F2213',
         },
         dustyrose: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',  // soft dusty rose surface
-          200: '#EFCFC5',
-          400: '#E4A493',
+          50: '#FDF7F5',
+          100: '#F9E9E4',  // soft dusty rose surface
+          200: '#F3CFC5',
+          400: '#E1A392',
           500: '#D98E77',  // secondary dusty rose / salmon
-          600: '#C2735C',  // dusty rose hover
-          700: '#9E5440',
+          600: '#C4765E',  // dusty rose hover
+          700: '#A75C46',
         },
         espresso: {
-          50: '#F8EFEA',
-          100: '#EADCD5',
-          500: '#5C4339',
-          700: '#47332B',
-          900: '#3D2B24',  // tertiary/dark accent deep espresso brown
+          50: '#F8F5F4',
+          100: '#EBE4E1',
+          200: '#D7C7C1',
+          500: '#705044',
+          700: '#523A31',
+          900: '#3D2B24',  // deep espresso brown dark accent / footer
         },
         warmtext: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          500: '#6E554B',  // muted warm brown text
-          700: '#4A372E',  // subhead text
+          50: '#FBEFE6',
+          100: '#F4E2D5',
+          500: '#7A6258',  // muted warm text
+          700: '#4F3930',  // subhead text
           900: '#2E2019',  // deep warm brown primary text
         },
+        warmborder: '#E8D5C8', // soft warm border
         // Legacy alias tokens mapped for full compatibility
         cream: {
-          50: '#FBEFE6',   // mapped to warm peach base
-          100: '#F8E5DF',
-          200: '#EAD5C7',
-          card: '#FDF4EC',
+          50: '#FBEFE6',
+          100: '#F5E4D7',
+          200: '#EBD3C2',
+          card: '#FFFDFB',
         },
         mint: {
-          50: '#FBEFE6',   // mapped to warm peach base
-          100: '#F8E5DF',
-          200: '#EAD5C7',
-          card: '#FDF4EC',
+          50: '#FBEFE6',
+          100: '#F5E4D7',
+          200: '#EBD3C2',
+          card: '#FFFDFB',
         },
         olive: {
           50: '#FDF5F2',
-          100: '#F9E5DD',
-          200: '#F0C5B7',
-          400: '#CA7B61',
+          100: '#F7E4DC',
+          200: '#ECC5B7',
+          400: '#C9775C',
           500: '#B5654A',  // mapped to deep rust
-          600: '#9C4F36',  // mapped to deep rust hover
-          700: '#823C27',
-          900: '#3D2B24',
+          600: '#9E5239',
+          700: '#84412B',
+          900: '#4F2213',
         },
         leaf: {
           50: '#FDF5F2',
-          100: '#F9E5DD',
-          200: '#F0C5B7',
-          400: '#CA7B61',
+          100: '#F7E4DC',
+          200: '#ECC5B7',
+          400: '#C9775C',
           500: '#B5654A',  // mapped to deep rust
-          600: '#9C4F36',
-          700: '#823C27',
-          800: '#3D2B24',
+          600: '#9E5239',
+          700: '#84412B',
+          800: '#4F2213',
         },
         sage: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          200: '#EFCFC5',
-          400: '#E4A493',
+          50: '#FDF7F5',
+          100: '#F9E9E4',
+          200: '#F3CFC5',
+          400: '#E1A392',
           500: '#D98E77',  // mapped to dusty rose
-          600: '#C2735C',
-          700: '#9E5440',
+          600: '#C4765E',
+          700: '#A75C46',
         },
         tan: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          200: '#EFCFC5',
-          400: '#E4A493',
+          50: '#FDF7F5',
+          100: '#F9E9E4',
+          200: '#F3CFC5',
+          400: '#E1A392',
           500: '#D98E77',  // mapped to dusty rose
-          600: '#C2735C',
-          700: '#9E5440',
+          600: '#C4765E',
+          700: '#A75C46',
         },
         terracotta: {
           50: '#FDF5F2',
-          100: '#F9E5DD',
-          500: '#B5654A',  // mapped to deep rust
-          600: '#9C4F36',
+          100: '#F7E4DC',
+          500: '#B5654A',  // deep rust / terracotta
+          600: '#9E5239',
         },
         gold: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          200: '#EFCFC5',
-          400: '#E4A493',
+          50: '#FDF7F5',
+          100: '#F9E9E4',
+          200: '#F3CFC5',
+          400: '#E1A392',
           500: '#D98E77',  // mapped to dusty rose
-          600: '#C2735C',
+          600: '#C4765E',
         },
         charcoalolive: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          500: '#6E554B',
-          700: '#4A372E',
+          50: '#FBEFE6',
+          100: '#F4E2D5',
+          500: '#7A6258',
+          700: '#4F3930',
           900: '#2E2019',  // deep warm brown text
         },
         darkcharcoal: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          200: '#EAD5C7',
-          500: '#6E554B',  // muted text
-          700: '#4A372E',
+          50: '#FBEFE6',
+          100: '#F4E2D5',
+          200: '#EBD3C2',
+          500: '#7A6258',
+          700: '#4F3930',
           900: '#2E2019',  // deep warm brown text
         },
         warmbrown: {
-          50: '#FDF6F4',
-          100: '#F8E9E4',
-          500: '#6E554B',
-          700: '#47332B',
+          50: '#FBEFE6',
+          100: '#F4E2D5',
+          500: '#7A6258',
+          700: '#4F3930',
           900: '#2E2019',
         },
-        warmborder: '#EAD5C7', // warm peach border
         forest: {
           50: '#FDF5F2',
-          100: '#F9E5DD',
-          400: '#D98E77',
+          100: '#F7E4DC',
+          400: '#C9775C',
           600: '#B5654A',
-          800: '#2E2019',
+          800: '#84412B',
           900: '#3D2B24',
         },
         earth: {
-          brown: '#4A372E',
+          brown: '#4F3930',
           'brown-dark': '#2E2019',
           terracotta: '#B5654A',
           tan: '#D98E77',
@@ -159,26 +160,26 @@ export default {
         },
         dark: {
           bg: '#3D2B24',
-          card: '#2E2019',
-          elevated: '#47332B',
+          card: '#4F3930',
+          elevated: '#523A31',
           border: '#B5654A',
-          muted: '#E4A493'
+          muted: '#E1A392'
         },
         brand: {
-          primary: '#B5654A',  // deep rust
-          hover: '#9C4F36',    // rust hover
+          primary: '#B5654A',  // deep rust / terracotta
+          hover: '#9E5239',    // rust hover
           accent: '#D98E77',   // dusty rose
-          espresso: '#3D2B24', // deep espresso
+          espresso: '#3D2B24', // deep espresso brown
           emerald: '#D98E77',
-          amber: '#D98E77',
+          amber: '#F59E0B',    // status amber kept distinct
           purple: '#B5654A'
         }
       },
       fontFamily: {
-        heading: ['Fraunces', 'serif'],
+        heading: ['Sora', 'sans-serif'],
         sans: ['Inter', 'sans-serif'],
-        serif: ['Fraunces', 'serif'],
-        display: ['Fraunces', 'serif'],
+        serif: ['Sora', 'sans-serif'],
+        display: ['Sora', 'sans-serif'],
       },
       boxShadow: {
         'glow-primary': '0 10px 30px -5px rgba(181, 101, 74, 0.25)',

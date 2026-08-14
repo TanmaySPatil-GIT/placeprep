@@ -115,36 +115,21 @@ export async function executeSingleTestCase(sourceCode, language, input, expecte
 }
 
 /**
- * Fallback execution engine when Judge0 is rate limited or offline
+ * Error response handler when Judge0 API is rate limited or offline
  */
 function fallbackExecuteTestCase(sourceCode, language, input, expectedOutput, errorMessage) {
-  let passed = true;
-  let stdout = expectedOutput || 'Execution completed';
-
-  // Basic JS safety sandbox evaluation
-  if (language === 'javascript') {
-    try {
-      if (sourceCode.includes('return')) {
-        passed = true;
-      }
-    } catch (e) {
-      passed = false;
-      stdout = e.message;
-    }
-  }
-
   return {
-    success: true,
-    passed,
-    stdout: stdout.trim(),
-    stderr: '',
+    success: false,
+    passed: false,
+    stdout: '',
+    stderr: `Judge0 execution service unavailable: ${errorMessage}`,
     compileOutput: '',
-    time: '24ms (Fallback Engine)',
-    memory: '1800 KB',
-    status: 'Accepted (Fallback Verified)',
+    time: '0ms',
+    memory: '0 KB',
+    status: 'Execution Error',
     input: input || '',
     expectedOutput: expectedOutput || '',
-    note: `Execution served via fallback engine due to: ${errorMessage}`
+    actualOutput: `Judge0 execution service unavailable: ${errorMessage}`
   };
 }
 

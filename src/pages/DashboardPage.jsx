@@ -5,6 +5,8 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { db, auth } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePrep } from '../context/PrepContext';
+import PlacementReadinessSection from '../components/PlacementReadinessSection';
+import GamificationWidget from '../components/GamificationWidget';
 import { 
   Trophy, 
   Target, 
@@ -310,6 +312,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Signature Placement Readiness Section */}
+      <PlacementReadinessSection />
+
+      {/* Candidate Placement XP, Badges & Campus Leaderboard Widget */}
+      <GamificationWidget reportsHistory={reportsHistory} />
+
       {/* Needs Retake Alert Card (<60% Round Flagging - Keep Status Amber Intact) */}
       {lowScoreRounds.length > 0 && (
         <div className="rounded-xl p-6 bg-amber-50/70 border border-amber-200 space-y-3 shadow-warm-sm">
@@ -490,11 +498,11 @@ export default function DashboardPage() {
           <div className="h-56 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#EAD5C7" />
-                <XAxis dataKey="date" stroke="#6E554B" fontSize={11} />
-                <YAxis domain={[50, 100]} stroke="#6E554B" fontSize={11} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E8D5C8" />
+                <XAxis dataKey="date" stroke="#7A6258" fontSize={11} />
+                <YAxis domain={[50, 100]} stroke="#7A6258" fontSize={11} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#FDF4EC', borderColor: '#EAD5C7', borderRadius: '12px', fontSize: '12px', color: '#2E2019', boxShadow: '0 8px 24px -4px rgba(46,32,25,0.08)' }}
+                  contentStyle={{ backgroundColor: '#FFFDFB', borderColor: '#E8D5C8', borderRadius: '12px', fontSize: '12px', color: '#2E2019', boxShadow: '0 8px 24px -4px rgba(46,32,25,0.08)' }}
                   labelStyle={{ color: '#B5654A', fontWeight: 'bold' }}
                 />
                 <Line type="monotone" dataKey="Score" stroke="#B5654A" strokeWidth={3} dot={{ fill: '#D98E77', r: 5 }} />
