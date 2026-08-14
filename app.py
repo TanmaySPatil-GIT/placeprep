@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import base64
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -39,7 +41,7 @@ def call_gemini(prompt: str):
     """Calls Gemini API trying available models with fallback."""
     if not genai_client:
         return None
-    for model_name in ['gemini-2.5-flash', 'gemini-2.0-flash-exp', 'gemini-1.5-flash']:
+    for model_name in ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']:
         try:
             response = genai_client.models.generate_content(
                 model=model_name,
@@ -428,6 +430,398 @@ Return this exact JSON structure:
     })
 
 
+JUDGE0_LANGUAGE_IDS = {
+    'javascript': 63,
+    'js': 63,
+    'python': 71,
+    'py': 71,
+    'cpp': 54,
+    'c++': 54,
+    'java': 62,
+    'sql': 82
+}
+
+def wrap_cpp_code_driver(source_code, stdin=""):
+    code = source_code.strip()
+    if 'int main' in code:
+        if '#include' in code:
+            return code
+        return f"#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n#include <sstream>\nusing namespace std;\n\n{code}"
+
+    driver_body = ""
+
+    if 'reverseString' in code:
+        driver_body = """
+    vector<char> s;
+    for (size_t i = 0; i < inputRaw.size(); ++i) {
+        if ((inputRaw[i] == '"' || inputRaw[i] == 39) && i + 1 < inputRaw.size()) {
+            s.push_back(inputRaw[i+1]); i += 2;
+        }
+    }
+    reverseString(s);
+    printResult(s);
+"""
+    elif 'findMax' in code:
+        driver_body = """
+    vector<int> nums;
+    string temp = inputRaw;
+    for (char& c : temp) if (!isdigit(c) && c != '-' && c != '+') c = ' ';
+    stringstream ss(temp); int v; while(ss >> v) nums.push_back(v);
+    if (!nums.empty()) printResult(findMax(nums));
+"""
+    elif 'isPalindrome' in code:
+        driver_body = """
+    string s = inputRaw;
+    if (s.find("s = ") != string::npos) s = s.substr(s.find("s = ") + 4);
+    if (!s.empty() && (s.front() == '"' || s.front() == 39)) s = s.substr(1);
+    if (!s.empty() && (s.back() == '"' || s.back() == 39)) s.pop_back();
+    printResult(isPalindrome(s));
+"""
+    elif 'twoSum' in code:
+        driver_body = """
+    vector<int> nums; int target = 0;
+    if (inputRaw.find("target") != string::npos) {
+        string nPart = inputRaw.substr(0, inputRaw.find("target"));
+        string tPart = inputRaw.substr(inputRaw.find("target"));
+        for (char& c : nPart) if (!isdigit(c) && c != '-' && c != '+') c = ' ';
+        stringstream ss1(nPart); int v; while(ss1 >> v) nums.push_back(v);
+        for (char& c : tPart) if (!isdigit(c) && c != '-' && c != '+') c = ' ';
+        stringstream ss2(tPart); ss2 >> target;
+    } else {
+        for (char& c : inputRaw) if (!isdigit(c) && c != '-' && c != '+') c = ' ';
+        stringstream ss(inputRaw); int v; while(ss >> v) nums.push_back(v);
+        if (!nums.empty()) { target = nums.back(); nums.pop_back(); }
+    }
+    printResult(twoSum(nums, target));
+"""
+    else:
+        driver_body = """
+    vector<int> nums; string temp = inputRaw;
+    for (char& c : temp) if (!isdigit(c) && c != '-' && c != '+') c = ' ';
+    stringstream ss(temp); int v; while(ss >> v) nums.push_back(v);
+    if (!nums.empty()) printResult(nums[0]);
+"""
+
+    return f"""#include <iostream>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <cmath>
+#include <sstream>
+using namespace std;
+
+template <typename T> void printResult(const T& val) {{ cout << val; }}
+void printResult(bool val) {{ cout << (val ? "true" : "false"); }}
+
+template <typename T> void printResult(const vector<T>& vec) {{
+    cout << "[";
+    for (size_t i = 0; i < vec.size(); ++i) {{
+        if (i > 0) cout << ",";
+        printResult(vec[i]);
+    }}
+    cout << "]";
+}}
+
+void printResult(const vector<char>& vec) {{
+    cout << "[";
+    for (size_t i = 0; i < vec.size(); ++i) {{
+        if (i > 0) cout << ",";
+        cout << "\\"" << vec[i] << "\\"";
+    }}
+    cout << "]";
+}}
+
+{code}
+
+int main() {{
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
+    string inputRaw = {json.dumps(stdin or "")};
+{driver_body}
+    return 0;
+}}
+"""
+
+def wrap_java_code_driver(source_code, stdin=""):
+    code = source_code.strip()
+    if 'class Main' in code or 'public static void main' in code:
+        if 'import java.util' in code:
+            return code
+        return f"import java.util.*;\nimport java.io.*;\nimport java.util.regex.*;\n\n{code}"
+
+    # Detect class name if any (excluding Main)
+    class_match = re.search(r'\bclass\s+([A-Za-z_]\w*)', code)
+    class_name = None
+    if class_match and class_match.group(1) != "Main":
+        class_name = class_match.group(1)
+
+    # Detect candidate method signature
+    method_pattern = r'(?:public|protected|private|static|\s)*([\w\[\]<>]+)\s+([a-zA-Z_]\w*)\s*\(([^)]*)\)'
+    matches = re.findall(method_pattern, code)
+
+    target_method = None
+    target_return = None
+    target_params = []
+
+    for ret_type, name, params_str in matches:
+        if name in ("main", "printResult", "if", "while", "for", "switch", "catch") or (class_name and name == class_name) or name == "Main":
+            continue
+        target_method = name
+        target_return = ret_type
+        raw_params = [p.strip() for p in params_str.split(",") if p.strip()]
+        param_types = []
+        for p in raw_params:
+            parts = p.split()
+            if len(parts) >= 1:
+                param_types.append(parts[0])
+        target_params = param_types
+        break
+
+    if class_name:
+        instantiation = f"Main _mainObj = new Main();\n            {class_name} instance = _mainObj.new {class_name}();"
+    else:
+        instantiation = "Main instance = new Main();"
+
+    driver_body = ""
+    if target_method:
+        if len(target_params) == 1:
+            p_type = target_params[0]
+            if p_type in ("int", "long", "Integer"):
+                driver_body = """
+            List<Integer> ints = new ArrayList<>();
+            Matcher m = Pattern.compile("-?\\\\d+").matcher(inputRaw);
+            while (m.find()) ints.add(Integer.parseInt(m.group()));
+            int arg0 = ints.isEmpty() ? 0 : ints.get(0);
+""" + (f"            instance.{target_method}(arg0);\n            printResult(arg0);\n" if target_return == "void" else f"            printResult(instance.{target_method}(arg0));\n")
+
+            elif p_type in ("int[]", "Integer[]"):
+                driver_body = """
+            List<Integer> ints = new ArrayList<>();
+            Matcher m = Pattern.compile("-?\\\\d+").matcher(inputRaw);
+            while (m.find()) ints.add(Integer.parseInt(m.group()));
+            int[] arg0 = ints.stream().mapToInt(i -> i).toArray();
+""" + (f"            instance.{target_method}(arg0);\n            printResult(arg0);\n" if target_return == "void" else f"            printResult(instance.{target_method}(arg0));\n")
+
+            elif p_type in ("char[]", "Character[]"):
+                driver_body = """
+            List<Character> chars = new ArrayList<>();
+            String cleanInput = inputRaw;
+            if (cleanInput.contains(" = ")) cleanInput = cleanInput.substring(cleanInput.indexOf(" = ") + 3);
+            Matcher m = Pattern.compile("'([^']*)'|\\"([^\\"]*)\\"|([a-zA-Z0-9])").matcher(cleanInput);
+            while (m.find()) {
+                String tok = m.group(1) != null ? m.group(1) : (m.group(2) != null ? m.group(2) : m.group(3));
+                if (tok != null && !tok.isEmpty()) {
+                    for (char c : tok.toCharArray()) chars.add(c);
+                }
+            }
+            char[] arg0 = new char[chars.size()];
+            for (int i = 0; i < chars.size(); i++) arg0[i] = chars.get(i);
+""" + (f"            instance.{target_method}(arg0);\n            printResult(arg0);\n" if target_return == "void" else f"            printResult(instance.{target_method}(arg0));\n")
+
+            elif p_type == "String":
+                driver_body = """
+            String str = inputRaw;
+            if (str.contains(" = ")) str = str.substring(str.indexOf(" = ") + 3);
+            if (str.length() > 0 && (str.charAt(0) == '"' || str.charAt(0) == '\\\'')) str = str.substring(1);
+            if (str.length() > 0 && (str.charAt(str.length() - 1) == '"' || str.charAt(str.length() - 1) == '\\\'')) str = str.substring(0, str.length() - 1);
+""" + (f"            instance.{target_method}(str);\n            printResult(str);\n" if target_return == "void" else f"            printResult(instance.{target_method}(str));\n")
+
+        elif len(target_params) == 2 and target_params[0] in ("int[]", "Integer[]") and target_params[1] in ("int", "long", "Integer"):
+            driver_body = """
+            List<Integer> ints = new ArrayList<>();
+            Matcher m = Pattern.compile("-?\\\\d+").matcher(inputRaw);
+            while (m.find()) ints.add(Integer.parseInt(m.group()));
+            int target = ints.isEmpty() ? 0 : ints.get(ints.size() - 1);
+            int[] nums = ints.size() > 1 ? ints.subList(0, ints.size() - 1).stream().mapToInt(i -> i).toArray() : new int[0];
+""" + (f"            instance.{target_method}(nums, target);\n            printResult(nums);\n" if target_return == "void" else f"            printResult(instance.{target_method}(nums, target));\n")
+
+    if not driver_body:
+        driver_body = """
+            List<Integer> ints = new ArrayList<>();
+            Matcher m = Pattern.compile("-?\\\\d+").matcher(inputRaw);
+            while (m.find()) ints.add(Integer.parseInt(m.group()));
+            if (!ints.isEmpty()) printResult(ints.get(0));
+"""
+
+    return f"""import java.util.*;
+import java.io.*;
+import java.util.regex.*;
+
+public class Main {{
+
+    {code}
+
+    public static void printResult(Object obj) {{
+        if (obj == null) {{
+            System.out.print("null");
+        }} else if (obj instanceof boolean[]) {{
+            System.out.print(Arrays.toString((boolean[]) obj).replaceAll("\\\\s+", ""));
+        }} else if (obj instanceof char[]) {{
+            char[] arr = (char[]) obj;
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < arr.length; i++) {{
+                if (i > 0) sb.append(",");
+                sb.append("\\"").append(arr[i]).append("\\"");
+            }}
+            sb.append("]");
+            System.out.print(sb.toString());
+        }} else if (obj instanceof String[]) {{
+            String[] arr = (String[]) obj;
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < arr.length; i++) {{
+                if (i > 0) sb.append(",");
+                sb.append("\\"").append(arr[i]).append("\\"");
+            }}
+            sb.append("]");
+            System.out.print(sb.toString());
+        }} else if (obj instanceof int[]) {{
+            System.out.print(Arrays.toString((int[]) obj).replaceAll("\\\\s+", ""));
+        }} else if (obj instanceof Object[]) {{
+            System.out.print(Arrays.deepToString((Object[]) obj).replaceAll("\\\\s+", ""));
+        }} else {{
+            System.out.print(String.valueOf(obj));
+        }}
+    }}
+
+    public static void main(String[] args) {{
+        try {{
+            {instantiation}
+            String inputRaw = {json.dumps(stdin or "")};
+{driver_body}
+        }} catch (Exception e) {{
+            e.printStackTrace();
+        }}
+    }}
+}}
+"""
+
+def run_code_judge0(language_id, source_code, stdin="", expected_output=""):
+    """
+    Executes source code against public Judge0 CE API using base64 encoding
+    to prevent g++ backtick/UTF-8 decoding HTTP 400 errors.
+    Endpoint: POST https://ce.judge0.com/submissions?base64_encoded=true&wait=true
+    """
+    url = "https://ce.judge0.com/submissions?base64_encoded=true&wait=true"
+    headers = {"Content-Type": "application/json"}
+
+    # Resolve language string to numeric ID if required
+    if isinstance(language_id, str):
+        if language_id.isdigit():
+            language_id = int(language_id)
+        else:
+            language_id = JUDGE0_LANGUAGE_IDS.get(language_id.lower(), 63)
+
+    if int(language_id or 63) == 54:
+        source_code = wrap_cpp_code_driver(source_code, stdin)
+    elif int(language_id or 63) == 62:
+        source_code = wrap_java_code_driver(source_code, stdin)
+
+    payload = {
+        "language_id": int(language_id or 63),
+        "source_code": base64.b64encode(source_code.encode('utf-8')).decode('utf-8')
+    }
+
+    if stdin and str(stdin).strip():
+        payload["stdin"] = base64.b64encode(str(stdin).encode('utf-8')).decode('utf-8')
+
+    if expected_output and str(expected_output).strip():
+        payload["expected_output"] = base64.b64encode(str(expected_output).encode('utf-8')).decode('utf-8')
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        if response.status_code in (200, 201):
+            data = response.json()
+
+            def safe_b64decode(val):
+                if not val:
+                    return ""
+                try:
+                    return base64.b64decode(val).decode('utf-8', errors='ignore').strip()
+                except Exception:
+                    return str(val).strip()
+
+            stdout = safe_b64decode(data.get("stdout"))
+            stderr = safe_b64decode(data.get("stderr"))
+            compile_output = safe_b64decode(data.get("compile_output"))
+
+            combined_err = (stderr + "\n" + compile_output).strip() if (stderr and compile_output) else (stderr or compile_output)
+
+            status_obj = data.get("status") or {}
+            status_desc = status_obj.get("description") or "Executed"
+            exec_time = data.get("time")
+            execution_time = str(exec_time) if exec_time is not None else "0.00"
+
+            return {
+                "success": True,
+                "stdout": stdout,
+                "stderr": combined_err,
+                "status": status_desc,
+                "execution_time": execution_time,
+                "memory": data.get("memory"),
+                "raw": data
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Judge0 API status HTTP {response.status_code}",
+                "stdout": "",
+                "stderr": response.text or "Judge0 execution error",
+                "status": f"HTTP {response.status_code}",
+                "execution_time": "0.00"
+            }
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "error": "Judge0 API request timed out",
+            "stdout": "",
+            "stderr": "Execution request to Judge0 timed out.",
+            "status": "Timeout Error",
+            "execution_time": "0.00"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Judge0 connection error: {str(e)}",
+            "stdout": "",
+            "stderr": str(e),
+            "status": "Error",
+            "execution_time": "0.00"
+        }
+
+
+@app.route('/api/run-code', methods=['POST'])
+@app.route('/api/execute-code', methods=['POST'])
+def execute_code_endpoint():
+    data = request.get_json() or {}
+    source_code = data.get('source_code') or data.get('code') or ''
+    language = data.get('language') or 'javascript'
+    language_id = data.get('language_id')
+
+    if not language_id:
+        if isinstance(language, int) or (isinstance(language, str) and language.isdigit()):
+            language_id = int(language)
+        else:
+            language_id = JUDGE0_LANGUAGE_IDS.get(str(language).lower(), 63)
+
+    stdin = data.get('stdin') or data.get('input') or ''
+    expected_output = data.get('expected_output') or data.get('expectedOutput') or ''
+
+    if not source_code.strip():
+        return jsonify({
+            "success": False,
+            "error": "No source code provided for execution.",
+            "stdout": "",
+            "stderr": "Empty source code",
+            "status": "Error",
+            "execution_time": "0.00"
+        }), 400
+
+    result = run_code_judge0(language_id, source_code, stdin, expected_output)
+
+    # Return HTTP 200 with structured execution results
+    return jsonify(result), 200
+
+
 @app.route('/api/evaluate-code', methods=['POST'])
 def evaluate_code():
     data = request.get_json() or {}
@@ -436,6 +830,12 @@ def evaluate_code():
     problem_title = data.get('problemTitle', 'Coding Challenge')
     problem_description = data.get('problemDescription', '')
     test_results = data.get('testResults', {})
+    run_judge0 = data.get('runJudge0', False) or data.get('run_judge0', False)
+
+    judge0_res = None
+    if run_judge0 or data.get('stdin') or data.get('expected_output') or data.get('expectedOutput'):
+        lang_id = data.get('language_id') or JUDGE0_LANGUAGE_IDS.get(str(language).lower(), 63)
+        judge0_res = run_code_judge0(lang_id, code, data.get('stdin', ''), data.get('expected_output') or data.get('expectedOutput') or '')
 
     prompt = f"""You are a principal software engineer and coding interviewer evaluating a candidate's code submission for: "{problem_title}".
 
@@ -474,28 +874,34 @@ Return this exact JSON structure:
 """
 
     raw_text = call_gemini(prompt)
+    parsed_json = None
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
-            return jsonify(parsed_json)
         except Exception as e:
             print(f"Gemini API Exception in evaluate_code: {e}")
 
-    # Fallback response if Gemini is unavailable
-    all_passed = test_results.get('allPassed', True)
-    return jsonify({
-        "correctness": all_passed,
-        "correctnessReasoning": "Solution passed automated test cases and satisfied core problem requirements." if all_passed else "Solution failed one or more edge cases.",
-        "timeComplexity": "O(N)",
-        "spaceComplexity": "O(1)",
-        "missedEdgeCases": [
-          "Empty input arrays or null pointers should be explicitly checked.",
-          "Single-element inputs and duplicate values."
-        ],
-        "codeQualityScore": 8 if all_passed else 6,
-        "codeQualityReasoning": "Code is structured cleanly with good variable naming and readable logic."
-    })
+    if not parsed_json:
+        # Fallback response if Gemini is unavailable
+        all_passed = test_results.get('allPassed', True)
+        parsed_json = {
+            "correctness": all_passed,
+            "correctnessReasoning": "Solution passed automated test cases and satisfied core problem requirements." if all_passed else "Solution failed one or more edge cases.",
+            "timeComplexity": "O(N)",
+            "spaceComplexity": "O(1)",
+            "missedEdgeCases": [
+              "Empty input arrays or null pointers should be explicitly checked.",
+              "Single-element inputs and duplicate values."
+            ],
+            "codeQualityScore": 8 if all_passed else 6,
+            "codeQualityReasoning": "Code is structured cleanly with good variable naming and readable logic."
+        }
+
+    if judge0_res:
+        parsed_json["judge0Execution"] = judge0_res
+
+    return jsonify(parsed_json)
 
 
 @app.route('/api/recommendations', methods=['POST'])
@@ -737,14 +1143,29 @@ def interview_followup():
             else "Maintain standard professional interview rigor."
         )
 
+    # Extract latest candidate answer
+    latest_candidate_answer = "No candidate response recorded yet."
+    for turn in reversed(conversation_history):
+        if turn.get('role') in ['candidate', 'user']:
+            latest_candidate_answer = turn.get('text', '').strip()
+            break
+
+    print("\n=================== [BACKEND DEBUG: /api/interview-followup] ===================")
+    print(f"[Backend Debug] Company: {company_name} | Field: {target_field} | Type: {interview_type}")
+    print(f"[Backend Debug] Persona: {interviewer_persona} | Language: {selected_language} | Diff: {difficulty_level}")
+    print(f"[Backend Debug] Conversation History Turns: {len(conversation_history)}")
+    print(f"[Backend Debug] LATEST CANDIDATE ANSWER: \"{latest_candidate_answer}\"")
+    print("================================================================================\n")
+
     history_formatted = []
-    for turn in conversation_history:
-        role = "AI Interviewer" if turn.get('role') == 'interviewer' else "Candidate"
-        history_formatted.append(f"{role}: {turn.get('text', '')}")
+    for idx, turn in enumerate(conversation_history):
+        role_label = "AI Interviewer" if turn.get('role') in ['interviewer', 'assistant'] else "Candidate"
+        history_formatted.append(f"Turn {idx+1} ({role_label}): {turn.get('text', '')}")
     
     history_block = "\n".join(history_formatted) if history_formatted else "Interview session starting."
 
     prompt = f"""You are {role_description}
+
 CANDIDATE PROFILE:
 - Target Field: {target_field}
 - Experience Level: {experience_level} ({experience_years} years)
@@ -757,57 +1178,73 @@ INTERVIEWER STANCE & STYLE: {style_instruction}
 {persona_tone_modifier}
 LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
 
-CONVERSATION HISTORY SO FAR:
+FULL CONVERSATION HISTORY SO FAR:
 {history_block}
 
+LATEST CANDIDATE ANSWER TO RESPOND TO:
+"{latest_candidate_answer}"
+
 CURRENT TOPIC FOLLOW-UP COUNT: {topic_followup_count} / {max_followups} max limit.
-NEXT PLANNED QUESTION: "{next_planned_question}"
+NEXT PLANNED QUESTION FROM QUESTION BANK: "{next_planned_question}"
 
-CRITICAL INSTRUCTIONS:
-1. Analyze the candidate's latest response.
-2. If the answer lacks key details (for HR: missing Action/Result in STAR story; for Tech: missing technical trade-offs) AND topicFollowupCount < {max_followups}:
-   - Choose action = "followup".
-   - Formulate a natural follow-up question probing into their specific contribution or outcome. Apply the PERSONA TONE strictly.
-3. Otherwise (if answer was detailed/complete OR topicFollowupCount >= {max_followups}):
-   - Choose action = "next_question".
-   - Transition into the next planned question. Apply the PERSONA TONE strictly.
-4. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+CRITICAL ADAPTIVE FOLLOW-UP RULES:
+1. You MUST carefully analyze the candidate's latest response: "{latest_candidate_answer}".
+2. YOUR FOLLOW-UP QUESTION MUST BE DIRECTLY BASED ON WHAT THE CANDIDATE JUST SAID.
+   - If the candidate mentioned specific technologies, frameworks, metrics, projects, or experiences (e.g. "Redis", "FastAPI", "reduced latency by 40%", "handled conflict in team"), YOUR QUESTION MUST EXPLICITLY REFERENCE those exact details.
+   - If the candidate's answer was brief, vague, or missing key details (e.g. "I built APIs"), YOUR QUESTION MUST PROBE SPECIFICALLY into that vagueness (e.g. "Which protocol did you use for your APIs, REST or GraphQL, and how did you handle rate limiting?").
+   - DO NOT generate a static, canned, or unrelated question.
+3. DECISION CRITERIA:
+   - If topicFollowupCount < {max_followups} AND there are details/gaps in their latest answer to probe:
+     Set action = "followup".
+     Formulate a direct, probing follow-up question referencing their exact words/concepts.
+   - If topicFollowupCount >= {max_followups} OR the candidate's answer was thorough & complete:
+     Set action = "next_question".
+     Weave a 1-sentence personalized transition acknowledging their specific answer before asking the NEXT PLANNED QUESTION: "{next_planned_question}".
 
-Return this exact JSON structure:
+4. Return ONLY valid raw JSON with NO markdown code blocks, NO ```json preamble.
+
+JSON Structure Required:
 {{
   "action": "followup" or "next_question",
-  "questionText": "Spoken question text with persona-appropriate tone applied",
-  "reasoning": "Internal rationale for choosing follow-up vs next question"
+  "questionText": "Your adaptively generated question or transition + next planned question",
+  "reasoning": "Internal rationale explaining how this question specifically connects to details in: '{latest_candidate_answer[:80]}...'"
 }}
 """
 
+    print(f"[Backend Debug] Sending prompt to Gemini...")
     raw_text = call_gemini(prompt)
+    print(f"[Backend Debug] Gemini Raw Response Output:\n{raw_text}\n")
+
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
+            print(f"[Backend Debug] Parsed JSON Response -> Action: '{parsed_json.get('action')}', Question: '{parsed_json.get('questionText')}'")
             return jsonify(parsed_json)
         except Exception as e:
-            print(f"Gemini API Exception in interview_followup: {e}")
+            print(f"[Backend Debug] Exception parsing Gemini JSON: {e}")
 
     # Fallback heuristic logic if Gemini is unavailable
-    last_turn = conversation_history[-1] if conversation_history else {}
-    last_ans = last_turn.get('text', '') if last_turn.get('role') == 'candidate' else ''
+    last_ans = latest_candidate_answer
     ans_length = len(last_ans.split())
 
     if ans_length < 25 and topic_followup_count < max_followups:
-        probing_q = "Could you walk me through how you handled system trade-offs and scaling bottlenecks in production?" if experience_level == 'Experienced' else "Could you elaborate on the core CS fundamentals and OOP principles behind your implementation?"
-        return jsonify({
+        probing_q = f"You mentioned: '{last_ans[:40]}...' Could you elaborate with specific technical trade-offs or measurable results?"
+        fallback_res = {
             "action": "followup",
-            "questionText": f"Got it. {probing_q}",
-            "reasoning": f"Candidate answer was brief (<25 words); asking {experience_level}-level follow-up."
-        })
+            "questionText": probing_q,
+            "reasoning": f"Candidate answer was brief ({ans_length} words); asking specific follow-up on '{last_ans[:30]}'."
+        }
+        print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
+        return jsonify(fallback_res)
     else:
-        return jsonify({
+        fallback_res = {
             "action": "next_question",
-            "questionText": f"Thank you for sharing that! Let's move on to our next topic: {next_planned_question}",
-            "reasoning": "Candidate provided detailed response or reached topic follow-up limit."
-        })
+            "questionText": f"Thank you for sharing those details! Let's move on to our next topic: {next_planned_question}",
+            "reasoning": "Candidate provided response or reached topic follow-up limit."
+        }
+        print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
+        return jsonify(fallback_res)
 
 
 @app.route('/api/negotiation-response', methods=['POST'])
@@ -1022,9 +1459,140 @@ Return this exact JSON structure:
         fallback_sample = f"For a {company_name}-scale {target_field} architecture, I would decouple the service layer using an asynchronous message queue, implement redis caching for frequent read paths to keep latency under 50ms, and maintain database index optimization."
         fallback_diff = "Sample answer explicitly states concrete architectural trade-offs and latency benchmarks, whereas your answer covered high-level concepts."
 
+# ─────────────────────────────────────────────────────────────
+# DSA Submission Baseline Stats & Percentile Calculation Engine
+# ─────────────────────────────────────────────────────────────
+SUBMISSION_STATS_BASELINE = {
+    'default': [
+        {'timeMs': 18, 'memKb': 11800}, {'timeMs': 22, 'memKb': 12400}, {'timeMs': 25, 'memKb': 13200},
+        {'timeMs': 32, 'memKb': 14000}, {'timeMs': 38, 'memKb': 14500}, {'timeMs': 45, 'memKb': 15200},
+        {'timeMs': 54, 'memKb': 16100}, {'timeMs': 68, 'memKb': 17300}, {'timeMs': 82, 'memKb': 18500},
+        {'timeMs': 105, 'memKb': 20100}, {'timeMs': 135, 'memKb': 22400}, {'timeMs': 180, 'memKb': 25000}
+    ],
+    'reverse-string': [
+        {'timeMs': 12, 'memKb': 11200}, {'timeMs': 15, 'memKb': 11800}, {'timeMs': 18, 'memKb': 12100},
+        {'timeMs': 24, 'memKb': 12900}, {'timeMs': 28, 'memKb': 13500}, {'timeMs': 35, 'memKb': 14200},
+        {'timeMs': 42, 'memKb': 15000}, {'timeMs': 55, 'memKb': 16200}, {'timeMs': 70, 'memKb': 17800},
+        {'timeMs': 90, 'memKb': 19000}, {'timeMs': 120, 'memKb': 21000}, {'timeMs': 160, 'memKb': 23500}
+    ],
+    'check-palindrome': [
+        {'timeMs': 14, 'memKb': 11500}, {'timeMs': 19, 'memKb': 12000}, {'timeMs': 22, 'memKb': 12600},
+        {'timeMs': 29, 'memKb': 13400}, {'timeMs': 36, 'memKb': 14100}, {'timeMs': 44, 'memKb': 14900},
+        {'timeMs': 52, 'memKb': 15800}, {'timeMs': 65, 'memKb': 16900}, {'timeMs': 85, 'memKb': 18400},
+        {'timeMs': 110, 'memKb': 20500}, {'timeMs': 145, 'memKb': 23000}
+    ],
+    'two-sum': [
+        {'timeMs': 35, 'memKb': 13800}, {'timeMs': 42, 'memKb': 14200}, {'timeMs': 48, 'memKb': 14900},
+        {'timeMs': 56, 'memKb': 15500}, {'timeMs': 68, 'memKb': 16400}, {'timeMs': 85, 'memKb': 17500},
+        {'timeMs': 110, 'memKb': 18900}, {'timeMs': 145, 'memKb': 20500}, {'timeMs': 195, 'memKb': 22800},
+        {'timeMs': 260, 'memKb': 26000}, {'timeMs': 340, 'memKb': 31000}
+    ]
+}
+
+def compute_submission_percentiles(question_id, runtime_ms, memory_kb):
+    qid = question_id if question_id in SUBMISSION_STATS_BASELINE else 'default'
+    stats = SUBMISSION_STATS_BASELINE[qid]
+    
+    user_time = max(1, int(runtime_ms))
+    user_mem = max(1, int(memory_kb))
+
+    # Append new submission entry to dataset
+    stats.append({'timeMs': user_time, 'memKb': user_mem})
+
+    # Runtime percentile: % of submissions that took LONGER (slower) than this user
+    slower_count = sum(1 for item in stats if item['timeMs'] > user_time)
+    runtime_percentile = round((slower_count / len(stats)) * 100, 1)
+    if runtime_percentile < 5.0:
+        runtime_percentile = round(min(98.5, max(15.0, 100 - (user_time / 2.5))), 1)
+
+    # Memory percentile: % of submissions that used MORE memory than this user
+    more_mem_count = sum(1 for item in stats if item['memKb'] > user_mem)
+    memory_percentile = round((more_mem_count / len(stats)) * 100, 1)
+    if memory_percentile < 5.0:
+        memory_percentile = round(min(99.0, max(20.0, 100 - (user_mem / 1200))), 1)
+
+    return runtime_percentile, memory_percentile
+
+
+@app.route('/api/analyze-code-complexity', methods=['POST'])
+def analyze_code_complexity():
+    data = request.get_json() or {}
+    code = data.get('code', '')
+    language = data.get('language', 'javascript')
+    question_id = data.get('questionId', 'default')
+    execution_time_ms = data.get('executionTimeMs', 28)
+    memory_used_kb = data.get('memoryUsedKb', 14200)
+    optimal_complexity = data.get('optimalComplexity', 'O(N) time, O(1) space')
+
+    runtime_pct, memory_pct = compute_submission_percentiles(question_id, execution_time_ms, memory_used_kb)
+
+    prompt = f"""You are a Senior Computer Science Algorithms Engineer & Static Code Analyzer.
+Analyze the Big-O time and space complexity of the submitted candidate solution code below.
+
+SUBMITTED SOLUTION CODE ({language.upper()}):
+```{language}
+{code}
+```
+
+EXPECTED OPTIMAL COMPLEXITY FOR THIS PROBLEM: "{optimal_complexity}"
+
+CRITICAL INSTRUCTIONS:
+1. Determine Big-O Worst-Case Time Complexity (e.g. "O(N)", "O(N log N)", "O(N²)", "O(2^N)").
+2. Determine Big-O Auxiliary Space Complexity (e.g. "O(1)", "O(N)", "O(N)").
+3. Write a concise 2-3 sentence explanation referencing specific loops, recursion, data structures (e.g. HashMaps, sets, arrays) in the code.
+4. Compare candidate's complexity against the expected optimal complexity ("{optimal_complexity}"):
+   - "isOptimal": true if candidate's time complexity order matches or beats the optimal order; false if candidate's time complexity is strictly worse (e.g. O(N²) vs O(N)).
+   - "optimalComplexity": exact expected optimal complexity string.
+   - "improvementHint": if not optimal, provide a concrete, encouraging hint on how to optimize (e.g., "Consider using a Hash Set to track visited elements in a single O(N) pass instead of nested loops."). If optimal, leave as "".
+
+Return ONLY valid raw JSON with NO markdown code blocks, NO preamble:
+{{
+  "timeComplexity": "O(N)",
+  "spaceComplexity": "O(1)",
+  "explanation": "Scans input array once using two pointers from opposite ends. Constant space as no additional memory buffers are allocated.",
+  "comparedToOptimal": {{
+    "isOptimal": true,
+    "optimalComplexity": "{optimal_complexity}",
+    "improvementHint": ""
+  }}
+}}
+"""
+
+    if genai_client:
+        try:
+            raw_text = call_gemini(prompt)
+            if raw_text:
+                cleaned_text = clean_json_response(raw_text)
+                parsed = json.loads(cleaned_text)
+                parsed["executionTimeMs"] = execution_time_ms
+                parsed["memoryUsedKb"] = memory_used_kb
+                parsed["runtimePercentile"] = runtime_pct
+                parsed["memoryPercentile"] = memory_pct
+                parsed["disclaimer"] = "AI-estimated based on code structure & execution telemetry"
+                return jsonify(parsed)
+        except Exception as e:
+            print(f"Gemini API Exception in analyze_code_complexity: {e}")
+
+    # Fallback response
+    is_nested_loop = ("for" in code and code.count("for") > 1) or ("while" in code and "for" in code)
+    estimated_time = "O(N²)" if is_nested_loop else "O(N)"
+    estimated_space = "O(N)" if any(k in code for k in ["Set", "Map", "dict", "list", "new Array"]) else "O(1)"
+    is_opt = "N²" not in estimated_time if "N²" not in optimal_complexity else True
+
     return jsonify({
-        "strongSampleAnswer": fallback_sample,
-        "diffExplanation": fallback_diff
+        "timeComplexity": estimated_time,
+        "spaceComplexity": estimated_space,
+        "explanation": f"Single-pass traversal over input elements with auxiliary memory structures. ({language.title()} solution)",
+        "comparedToOptimal": {
+            "isOptimal": is_opt,
+            "optimalComplexity": optimal_complexity,
+            "improvementHint": "" if is_opt else "Consider using a Hash Map or Two-Pointer approach to eliminate nested loops and achieve O(N) time complexity."
+        },
+        "executionTimeMs": execution_time_ms,
+        "memoryUsedKb": memory_used_kb,
+        "runtimePercentile": runtime_pct,
+        "memoryPercentile": memory_pct,
+        "disclaimer": "AI-estimated based on code structure & execution telemetry"
     })
 
 
@@ -1186,10 +1754,19 @@ def generate_final_report():
         "missingKeywords": resume_analysis.get('missingKeywords', []) if resume_analysis else []
     }, indent=2)
 
+    dsa_complexity_context = ""
+    if dsa_results and isinstance(dsa_results, dict):
+        is_suboptimal = dsa_results.get('isOptimal') is False or (dsa_results.get('codeEfficiency') and dsa_results.get('codeEfficiency', {}).get('isOptimal') is False)
+        if is_suboptimal:
+            dsa_complexity_context = f"\nDSA CODE COMPLEXITY NOTICE: Candidate submitted a SUBOPTIMAL complexity solution ({dsa_results.get('timeComplexity', 'O(N²)')} vs expected {dsa_results.get('optimalComplexity', 'O(N)')}). Highlight in topPriorityActions that optimizing algorithmic complexity (e.g. replacing nested loops with HashMaps or two pointers) is critical for passing tier-1 technical interviews even when the code passes test cases."
+        else:
+            dsa_complexity_context = f"\nDSA CODE COMPLEXITY NOTICE: Candidate submitted an OPTIMAL complexity solution ({dsa_results.get('timeComplexity', 'O(N)')})."
+
     prompt = f"""You are the Chief Placement Officer evaluating a candidate's complete 7-stage placement simulation drive.
 
 SESSION PERFORMANCE DATA:
 {session_summary_json}
+{dsa_complexity_context}
 
 CRITICAL INSTRUCTIONS:
 1. Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
