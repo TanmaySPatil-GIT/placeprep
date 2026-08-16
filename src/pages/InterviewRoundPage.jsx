@@ -171,6 +171,8 @@ export default function InterviewRoundPage() {
   const answerTimerRef = useRef(null);
   const pauseCheckTimerRef = useRef(null);
 
+  const ttsTimerRef = useRef(null);
+
   // Helper to Speak Questions Aloud via TTS with Persona-Specific Pitch
   const triggerAISpeech = (textToSpeak, personaOverride) => {
     if (ttsMuted || !textToSpeak) {
@@ -178,19 +180,32 @@ export default function InterviewRoundPage() {
       return;
     }
 
+    if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
     const currentPersona = personaOverride || getActivePersona(totalExchanges);
 
     setAiState('speaking');
+
+    ttsTimerRef.current = setTimeout(() => {
+      setAiState('idle');
+    }, 12000);
+
     speakText({
       text: textToSpeak,
       voice: selectedVoice,
       langCode: selectedLanguage?.code || 'en-US',
       pitch: currentPersona.pitch,
       onStart: () => setAiState('speaking'),
-      onEnd: () => setAiState('idle'),
-      onError: () => setAiState('idle')
+      onEnd: () => {
+        if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+        setAiState('idle');
+      },
+      onError: () => {
+        if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+        setAiState('idle');
+      }
     });
   };
+
 
   // 1. Load face-api.js models & Available Voices
   useEffect(() => {
@@ -582,7 +597,6 @@ export default function InterviewRoundPage() {
 
     // 3. Call Flask Adaptive Follow-up Endpoint
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-
     const nextBankQ = questionsBank[bankQuestionIdx + 1] || questionsBank[0];
 
     const payload = {
@@ -601,61 +615,67 @@ export default function InterviewRoundPage() {
 
     console.log('[Interview Debug] Step 2 - Payload sent to /api/interview-followup:', payload);
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 25000);
+
+    let backendNextQ = null;
+    let isFollowup = false;
+
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      clearTimeout(fetchTimeout);
 
-      const data = await response.json();
-      console.log('[Interview Debug] Step 3 - Gemini response received from backend:', data);
-      setAiReasoning(data.reasoning || '');
+      if (response.ok) {
+        const data = await response.json();
+        console.log('[Interview Debug] Step 3 - Gemini response received from backend:', data);
+        setAiReasoning(data.reasoning || '');
 
-      if (data.action === 'followup') {
-        setTopicFollowupCount(prev => prev + 1);
-        const nextQText = data.questionText;
-        console.log('[Interview Debug] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', nextQText);
-
-        setCurrentSpokenQuestion(nextQText);
-        setCurrentBasedOn('Adaptive AI Probing Follow-Up');
-
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-        triggerAISpeech(nextQText);
-      } else {
-        const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
-        setBankQuestionIdx(nextIdx);
-        setTopicFollowupCount(0);
-
-        const nextQObj = questionsBank[nextIdx];
-        const nextQText = data.questionText || `Moving on to our next topic: ${nextQObj.question}`;
-        console.log('[Interview Debug] Step 4 - Rendering & speaking NEXT QUESTION:', nextQText);
-
-        setCurrentSpokenQuestion(nextQText);
-        setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
-
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-        triggerAISpeech(nextQText);
+        if (data.action === 'followup' && topicFollowupCount < 2) {
+          isFollowup = true;
+          backendNextQ = data.questionText;
+        } else if (data.questionText) {
+          backendNextQ = data.questionText;
+        }
       }
     } catch (err) {
-      console.warn('Follow-up endpoint notice:', err.message);
+      clearTimeout(fetchTimeout);
+      console.warn('[Interview Debug] Follow-up endpoint notice (using fallback):', err.message);
+    } finally {
+      setEvaluatingFollowup(false);
+    }
+
+    if (isFollowup && backendNextQ) {
+      setTopicFollowupCount(prev => prev + 1);
+      console.log('[Interview Debug] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', backendNextQ);
+
+      setCurrentSpokenQuestion(backendNextQ);
+      setCurrentBasedOn('Adaptive AI Probing Follow-Up');
+
+      setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
+      triggerAISpeech(backendNextQ);
+    } else {
       const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
       setBankQuestionIdx(nextIdx);
       setTopicFollowupCount(0);
 
       const nextQObj = questionsBank[nextIdx];
-      const fallbackText = `Got it, thanks for sharing. Let's move on to our next question: ${nextQObj.question}`;
-      
-      setCurrentSpokenQuestion(fallbackText);
+      const nextQText = backendNextQ || `Moving on to our next topic: ${nextQObj.question}`;
+      console.log(`[Interview Debug] Step 4 - Rendering & speaking NEXT QUESTION (Q${nextIdx + 1}):`, nextQText);
+
+      setCurrentSpokenQuestion(nextQText);
       setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
-      setConversationHistory(prev => [...prev, { role: 'interviewer', text: fallbackText }]);
-      triggerAISpeech(fallbackText);
-    } finally {
-      setEvaluatingFollowup(false);
+
+      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+      triggerAISpeech(nextQText);
     }
   };
+
 
   const isBrowserSpeechSupported = isTTSSupported();
 

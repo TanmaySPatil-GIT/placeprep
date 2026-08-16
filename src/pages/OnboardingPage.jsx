@@ -59,6 +59,7 @@ export default function OnboardingPage() {
   const [resumeFile, setResumeFile] = useState(null);
   const [uploadingResume, setUploadingResume] = useState(false);
   const [atsScorePreview, setAtsScorePreview] = useState(null);
+  const [onboardingStatusMsg, setOnboardingStatusMsg] = useState('Analyzing resume with Gemini Recruiter Engine...');
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -82,7 +83,12 @@ export default function OnboardingPage() {
 
     setResumeFile(file);
     setUploadingResume(true);
+    setOnboardingStatusMsg('Analyzing resume with Gemini Recruiter Engine...');
     setErrorMsg('');
+
+    const statusTimer = setTimeout(() => {
+      setOnboardingStatusMsg('Waking up server (Render cold start)... This may take up to a minute.');
+    }, 6000);
 
     const targetField = INITIAL_FIELDS.find(f => f.fieldId === targetFieldId)?.name || 'Software Development';
 
@@ -98,9 +104,11 @@ export default function OnboardingPage() {
       console.warn('Resume analysis notice during onboarding:', err.message);
       setAtsScorePreview(82);
     } finally {
+      clearTimeout(statusTimer);
       setUploadingResume(false);
     }
   };
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -460,8 +468,9 @@ export default function OnboardingPage() {
             {uploadingResume ? (
               <div className="space-y-2 py-4">
                 <Loader2 className="w-8 h-8 text-accent-gold animate-spin mx-auto" />
-                <p className="text-xs text-earth-cream/80">Analyzing resume with Gemini Recruiter Engine...</p>
+                <p className="text-xs text-earth-cream/80">{onboardingStatusMsg}</p>
               </div>
+
             ) : atsScorePreview !== null ? (
               <div className="space-y-2 py-2">
                 <div className="w-16 h-16 rounded-full bg-accent-gold/20 border border-accent-gold text-accent-gold flex items-center justify-center text-xl font-bold font-serif mx-auto">

@@ -74,14 +74,34 @@ export default function ResumePage() {
     uploadAndAnalyzeResume(selectedFile);
   };
 
+  const [statusMessage, setStatusMessage] = useState('Analyzing resume and extracting skills...');
+
   const uploadAndAnalyzeResume = async (pdfFile) => {
     setAnalyzing(true);
-    setAnalysisProgress(15);
+    setAnalysisProgress(10);
+    setStatusMessage('Uploading PDF resume to server...');
     setErrorMsg('');
 
+    let currentProgress = 10;
+    let elapsedSeconds = 0;
+
     const progressInterval = setInterval(() => {
-      setAnalysisProgress((prev) => (prev < 85 ? prev + 15 : prev));
-    }, 400);
+      elapsedSeconds += 0.5;
+      if (elapsedSeconds < 4) {
+        currentProgress = Math.min(30, currentProgress + 3);
+        setStatusMessage('Reading PDF text & initializing ATS parser...');
+      } else if (elapsedSeconds < 12) {
+        currentProgress = Math.min(60, currentProgress + 2);
+        setStatusMessage('Extracting technical skills & auditing resume metrics...');
+      } else if (elapsedSeconds < 25) {
+        currentProgress = Math.min(85, currentProgress + 1);
+        setStatusMessage('Waking up backend server (Render free tier cold start)... This may take up to a minute.');
+      } else {
+        currentProgress = Math.min(95, currentProgress + 0.5);
+        setStatusMessage('Server waking up... Finishing resume evaluation.');
+      }
+      setAnalysisProgress(Math.round(currentProgress));
+    }, 500);
 
     try {
       const data = await analyzeResumeApi(pdfFile, targetField, companyName);
@@ -99,6 +119,7 @@ export default function ResumePage() {
       setAnalyzing(false);
     }
   };
+
 
   const handleStartResumeInterview = async () => {
     if (!analysisResults?.extractedProfile) {
@@ -198,12 +219,13 @@ export default function ResumePage() {
 
         {/* Loading / Analyzing State */}
         {analyzing && (
-          <div className="pt-4 space-y-3 max-w-md mx-auto animate-fadeIn">
+          <div className="pt-4 space-y-3 max-w-lg mx-auto animate-fadeIn">
             <div className="flex items-center justify-between text-xs font-bold text-rust-500">
               <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin text-rust-500" /> Analyzing resume and extracting skills...
+                <Loader2 className="w-4 h-4 animate-spin text-rust-500 shrink-0" />
+                <span>{statusMessage}</span>
               </span>
-              <span>{analysisProgress}%</span>
+              <span className="shrink-0 ml-2">{analysisProgress}%</span>
             </div>
             <div className="w-full bg-peach-200 h-2 rounded-full overflow-hidden border border-warmborder">
               <div 
@@ -213,6 +235,7 @@ export default function ResumePage() {
             </div>
           </div>
         )}
+
 
         {/* Error Notice */}
         {errorMsg && (

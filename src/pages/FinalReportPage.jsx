@@ -2,14 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { collection, addDoc, query, where, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { RadialBarChart, RadialBar, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import html2pdf from 'html2pdf.js';
 import { db, auth } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { usePrep } from '../context/PrepContext';
 import { calculateAggregateCommunicationScore } from '../services/speechAnalyzer';
 import { generateSessionEmotionTimeline } from '../services/faceDetector';
 import { INITIAL_COURSE_CATALOG } from '../utils/seedCourseCatalog';
+import { getCompanyTier } from '../utils/seedCompanies';
 import { getBackendUrl } from '../config/api';
+
 import { 
   Award, 
   Sparkles, 
@@ -28,22 +29,19 @@ import {
   LayoutDashboard,
   Cpu,
   Layers,
-  HeartHandshake,
+  Share2,
+  Check,
+  Trophy,
+  Activity,
+  AlertTriangle,
+  Lightbulb,
+  ExternalLink,
   ChevronDown,
   ChevronUp,
-  Mic,
-  Info,
-  Share2,
-  Trophy,
-  Users,
-  Check,
-  Copy,
-  Globe,
+  UserCheck,
+  ShieldCheck,
   TrendingUp,
-  BarChart2,
-  ExternalLink,
-  GitCompare,
-  MessageSquareCode
+  Award as RibbonIcon
 } from 'lucide-react';
 
 export default function FinalReportPage() {
@@ -389,23 +387,79 @@ export default function FinalReportPage() {
       } catch (err) {
         console.warn('Final report API notice:', err.message);
         
-        // Fallback report structure
+        // Dynamically compute authentic scores from actual context data
+        const roundBreakdown = [];
+        const attemptedScores = [];
+
+        if (typeof resumeData?.atsScore === 'number') {
+          roundBreakdown.push({
+            roundName: "Stage 1: Resume ATS Audit",
+            score: resumeData.atsScore,
+            oneLineTakeaway: `Resume parsed with ${resumeData.atsScore}% ATS alignment for ${fieldName}.`
+          });
+          attemptedScores.push(resumeData.atsScore);
+        }
+
+        if (typeof aptitudeResult?.percentage === 'number') {
+          roundBreakdown.push({
+            roundName: "Stage 2: Aptitude & GK Round",
+            score: aptitudeResult.percentage,
+            oneLineTakeaway: `Scored ${aptitudeResult.percentage}% on quantitative and logical reasoning.`
+          });
+          attemptedScores.push(aptitudeResult.percentage);
+        }
+
+        const techScoreVal = dsaResult?.score ?? technicalMcqResult?.percentage;
+        if (typeof techScoreVal === 'number') {
+          roundBreakdown.push({
+            roundName: `Stage 4: ${fieldName} Technical Round`,
+            score: techScoreVal,
+            oneLineTakeaway: `Technical assessment completed with ${techScoreVal}% score.`
+          });
+          attemptedScores.push(techScoreVal);
+        }
+
+        const sdScoreVal = (systemDesignResult?.evaluation || {}).score ?? systemDesignResult?.score;
+        if (typeof sdScoreVal === 'number') {
+          roundBreakdown.push({
+            roundName: "Stage 5: System Design Architecture",
+            score: sdScoreVal,
+            oneLineTakeaway: `Architectural design score: ${sdScoreVal}%.`
+          });
+          attemptedScores.push(sdScoreVal);
+        }
+
+        const hrScoreVal = hrInterviewResult?.score ?? technicalInterviewResult?.score;
+        if (typeof hrScoreVal === 'number') {
+          roundBreakdown.push({
+            roundName: "Stage 6: Technical AI Mock Interview",
+            score: hrScoreVal,
+            oneLineTakeaway: `Interview telemetry score: ${hrScoreVal}%.`
+          });
+          attemptedScores.push(hrScoreVal);
+        }
+
+        const computedScore = attemptedScores.length > 0
+          ? Math.round(attemptedScores.reduce((a, b) => a + b, 0) / attemptedScores.length)
+          : 0;
+
         const fallback = {
-          readinessScore: 84,
-          readinessLabel: "Placement Ready — Strong Hire Signal",
-          executiveSummary: `Candidate completed the ${companyName} placement simulation for ${fieldName} demonstrating strong core technical capabilities and articulate communication across interview rounds.`,
-          roundBreakdown: [
-            { roundName: "Stage 2: Aptitude & GK Round", score: aptitudeResult?.percentage || 85, oneLineTakeaway: "Strong quantitative accuracy with fast reasoning speed." },
-            { roundName: `Stage 4: ${fieldName} Technical Round`, score: dsaResult?.score || 88, oneLineTakeaway: "Optimal solution passed all test cases within target time." },
-            { roundName: "Stage 5: System Design Architecture", score: systemDesignResult?.evaluation?.score || 86, oneLineTakeaway: "Solid component selection and architectural trade-offs." },
-            { roundName: "Stage 6: Technical AI Mock Interview", score: 82, oneLineTakeaway: "Clear vocal delivery with structured technical explanation." }
+          readinessScore: computedScore,
+          readinessLabel: computedScore >= 75 ? "Placement Ready Candidate" : computedScore > 0 ? "Developing Candidate" : "Diagnostic Incomplete — No Practice Rounds Recorded",
+          executiveSummary: computedScore > 0 
+            ? `Candidate completed ${attemptedScores.length} selection round(s) for ${companyName} (${fieldName}) achieving an authentic average readiness score of ${computedScore}%.`
+            : `No selection rounds have been completed yet for ${companyName} (${fieldName}). Complete practice modules to generate telemetry.`,
+          roundBreakdown: roundBreakdown.length > 0 ? roundBreakdown : [
+            { roundName: "Selection Diagnostic", score: 0, oneLineTakeaway: "No practice rounds completed yet." }
           ],
           topPriorityActions: [
-            "Maintain steady vocal pacing during high-stakes system design questions.",
-            "Add Docker and CI/CD keywords to resume experience section.",
-            "Complete targeted practice questions on company-specific patterns."
+            "Complete Stage 2 Aptitude & Technical MCQs to establish core score metrics.",
+            "Attempt Stage 4 Coding challenges for automated test-case evaluation.",
+            "Practice Stage 6 AI Mock Interview for speech and confidence telemetry."
           ],
-          encouragingClosingNote: `Great effort completing your ${companyName} placement simulation! You are well-prepared for upcoming campus recruitment drives.`
+          encouragingClosingNote: computedScore > 0 
+            ? `Good effort on your ${companyName} diagnostic! Continue completing remaining rounds to boost your score.`
+            : `Welcome to Placement Prep! Start with your first round to generate your personalized diagnostic report.`
         };
 
         setReport(fallback);
@@ -417,7 +471,8 @@ export default function FinalReportPage() {
     generateReport();
   }, [readOnlyReport]);
 
-  const readinessScore = report?.readinessScore || 85;
+  const readinessScore = report?.readinessScore ?? 0;
+
 
   return (
     <div className="space-y-8 py-2 max-w-5xl mx-auto">
@@ -481,11 +536,16 @@ export default function FinalReportPage() {
             <p className="text-xs text-darkcharcoal-500">
               Target Recruiter: <strong className="text-leaf-600 font-serif">{companyName}</strong> | Track: <strong className="text-darkcharcoal-900 font-serif">{fieldName}</strong>
             </p>
-            <div className="pt-1">
+            <div className="pt-1.5 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-mint-50 border border-warmborder text-darkcharcoal-900 text-xs font-bold font-serif shadow-warm-sm">
                 Interview taken at: <strong>{activeDifficulty} difficulty</strong>, <strong>{activeExpLevel}{activeExpLevel === 'Experienced' ? ` (${activeExpYears} yrs)` : ''} level</strong>
               </span>
+              <span className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full border text-xs font-extrabold shadow-warm-sm ${getCompanyTier(companyName).badgeBg}`}>
+                <Target className="w-3.5 h-3.5" />
+                <span>Benchmark: {getCompanyTier(companyName).label}</span>
+              </span>
             </div>
+
           </div>
 
           <div className="text-right text-xs text-darkcharcoal-500 font-mono">

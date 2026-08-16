@@ -169,57 +169,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchReports = async () => {
       if (!auth.currentUser) {
-        // Sample baseline mock reports for demo
-        setReportsHistory([
-          {
-            id: 'rep-1',
-            date: 'Aug 10, 2026',
-            company: activeCompany,
-            field: targetField,
-            readinessScore: sessionResults?.length > 0 ? 88 : 85,
-            readinessLabel: 'Placement Ready — Top 5% Candidate',
-            executiveSummary: 'Candidate demonstrated strong problem solving in coding and clear technical articulation.',
-            roundBreakdown: [
-              { roundName: 'Aptitude & GK', score: 85, oneLineTakeaway: 'High quantitative speed.' },
-              { roundName: 'Technical Round', score: 90, oneLineTakeaway: 'Optimal O(N) solution.' },
-              { roundName: 'AI Interview', score: 88, oneLineTakeaway: 'Structured STAR delivery.' }
-            ],
-            topPriorityActions: [
-              'Practice vocal pause control.',
-              'Add CI/CD keywords to resume.',
-              'Revise system design patterns.'
-            ],
-            encouragingClosingNote: 'Solid baseline performance!'
-          },
-          {
-            id: 'rep-2',
-            date: 'Aug 08, 2026',
-            company: 'Amazon',
-            field: 'Software Development',
-            readinessScore: 81,
-            readinessLabel: 'Strong Candidate — Minor Polish Needed',
-            executiveSummary: 'Good performance across DSA and interview rounds.',
-            roundBreakdown: [
-              { roundName: 'DSA Round', score: 84, oneLineTakeaway: 'Correct approach with minor edge case delay.' }
-            ],
-            topPriorityActions: ['Practice tree traversals.'],
-            encouragingClosingNote: 'Keep up the consistent practice!'
-          },
-          {
-            id: 'rep-3',
-            date: 'Aug 05, 2026',
-            company: 'TCS Digital',
-            field: 'Software Development',
-            readinessScore: 74,
-            readinessLabel: 'Developing Candidate',
-            executiveSummary: 'Passed initial quantitative tests.',
-            roundBreakdown: [
-              { roundName: 'Aptitude Round', score: 74, oneLineTakeaway: 'Moderate reasoning speed.' }
-            ],
-            topPriorityActions: ['Work on verbal reasoning speed.'],
-            encouragingClosingNote: 'Great foundation to build upon!'
-          }
-        ]);
+        setReportsHistory([]);
         return;
       }
 
@@ -250,11 +200,12 @@ export default function DashboardPage() {
   // Recharts Growth Trend Line Chart Data
   const trendData = [...reportsHistory].reverse().map(r => ({
     date: r.date || 'Recent',
-    Score: r.readinessScore || 75,
+    Score: typeof r.readinessScore === 'number' ? r.readinessScore : 0,
     company: r.company || 'Practice Drive'
   }));
 
-  const latestScore = reportsHistory[0]?.readinessScore || 88;
+  const latestScore = reportsHistory[0]?.readinessScore ?? 0;
+
 
   const handleOpenReport = (reportData) => {
     navigate('/final-report', { state: { reportData } });

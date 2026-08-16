@@ -5,6 +5,8 @@ import { db, auth } from '../firebase';
 import { usePrep } from '../context/PrepContext';
 import { useAuth } from '../context/AuthContext';
 import { calculateOverallSessionConfidence } from '../utils/confidenceScorer';
+import { getCompanyTier } from '../utils/seedCompanies';
+
 import { 
   Trophy, 
   Target, 
@@ -192,25 +194,28 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
   const finalTechScore = rawTechScore ?? reportTechScore;
   const finalInterviewScore = rawInterviewScore ?? reportInterviewScore;
 
-  // Check if candidate has ANY completed session / score data
+  // Strictly collect attempted scores
+  const attemptedScores = [];
+  if (typeof finalResumeScore === 'number') attemptedScores.push(finalResumeScore);
+  if (typeof finalAptitudeScore === 'number') attemptedScores.push(finalAptitudeScore);
+  if (typeof finalTechScore === 'number') attemptedScores.push(finalTechScore);
+  if (typeof finalInterviewScore === 'number') attemptedScores.push(finalInterviewScore);
+
   const hasAnyCompletedSession = Boolean(
-    finalResumeScore !== null ||
-    finalAptitudeScore !== null ||
-    finalTechScore !== null ||
-    finalInterviewScore !== null ||
-    latestReport?.readinessScore !== undefined
+    attemptedScores.length > 0 || (typeof latestReport?.readinessScore === 'number' && latestReport.readinessScore > 0)
   );
 
-  // Default sample benchmark display values if completed session exists
-  const resumeScore = finalResumeScore ?? 90;
-  const aptitudeScore = finalAptitudeScore ?? 82;
-  const techScore = finalTechScore ?? 74;
-  const interviewScore = finalInterviewScore ?? 81;
-
-  // Compute Overall Placement Readiness Percentage
-  const overallPercentage = latestReport?.readinessScore ?? Math.round(
-    (resumeScore + aptitudeScore + techScore + interviewScore) / 4
-  );
+  // Compute Overall Placement Readiness Percentage strictly from attempted rounds
+  let overallPercentage = 0;
+  if (typeof latestReport?.readinessScore === 'number' && latestReport.readinessScore > 0) {
+    overallPercentage = latestReport.readinessScore;
+  } else if (attemptedScores.length > 0) {
+    overallPercentage = Math.round(
+      attemptedScores.reduce((sum, score) => sum + score, 0) / attemptedScores.length
+    );
+  } else {
+    overallPercentage = 0;
+  }
 
   const levelInfo = getReadinessLevelInfo(overallPercentage);
 
@@ -219,7 +224,8 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
       id: 'resume',
       label: 'Resume',
       subtitle: 'ATS Audit & Keyword Match',
-      score: resumeScore,
+      score: typeof finalResumeScore === 'number' ? finalResumeScore : 0,
+      attempted: typeof finalResumeScore === 'number',
       icon: FileText,
       color: 'rust'
     },
@@ -227,7 +233,8 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
       id: 'aptitude',
       label: 'Aptitude',
       subtitle: 'Quantitative & Logical Speed',
-      score: aptitudeScore,
+      score: typeof finalAptitudeScore === 'number' ? finalAptitudeScore : 0,
+      attempted: typeof finalAptitudeScore === 'number',
       icon: Brain,
       color: 'dustyrose'
     },
@@ -235,7 +242,8 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
       id: 'technical',
       label: 'Technical',
       subtitle: 'DSA & System Architecture',
-      score: techScore,
+      score: typeof finalTechScore === 'number' ? finalTechScore : 0,
+      attempted: typeof finalTechScore === 'number',
       icon: Code2,
       color: 'rust'
     },
@@ -243,11 +251,13 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
       id: 'interview',
       label: 'Interview',
       subtitle: 'AI Speech & Facial Telemetry',
-      score: interviewScore,
+      score: typeof finalInterviewScore === 'number' ? finalInterviewScore : 0,
+      attempted: typeof finalInterviewScore === 'number',
       icon: Video,
       color: 'espresso'
     }
   ];
+
 
   const handleStartPractice = () => {
     if (currentUser) {
@@ -371,7 +381,23 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
               <p className="text-[11px] text-warmtext-500 font-sans leading-relaxed">
                 {levelInfo.description}
               </p>
+
+              {selectedCompany && (
+                <div className="pt-2.5 border-t border-warmborder/60">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-warmtext-500 block mb-1">
+                    Target Recruiter Benchmark
+                  </span>
+                  <div className={`px-3 py-1.5 rounded-lg border text-xs font-bold inline-flex items-center gap-1.5 ${getCompanyTier(selectedCompany).badgeBg}`}>
+                    <Target className="w-3.5 h-3.5" />
+                    <span>{selectedCompany.name || 'Company'} • {getCompanyTier(selectedCompany).label}</span>
+                  </div>
+                  <p className="text-[10px] text-warmtext-500 italic mt-1 leading-tight text-left">
+                    {getCompanyTier(selectedCompany).expectations}
+                  </p>
+                </div>
+              )}
             </div>
+
 
           </div>
 
@@ -399,9 +425,15 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
                     </div>
 
                     <div className="text-right">
-                      <span className="font-mono text-base font-extrabold text-rust-500">
-                        {cat.score}%
-                      </span>
+                      {cat.attempted ? (
+                        <span className="font-mono text-base font-extrabold text-rust-500">
+                          {cat.score}%
+                        </span>
+                      ) : (
+                        <span className="font-mono text-xs font-semibold text-warmtext-500 bg-peach-100 px-2.5 py-1 rounded-md border border-warmborder">
+                          Not Attempted
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -410,10 +442,11 @@ export default function PlacementReadinessSection({ onOpenAuthModal }) {
                     <div
                       className="bg-rust-500 h-full rounded-full transition-all duration-1000 ease-out shadow-warm-xs"
                       style={{
-                        width: isVisible ? `${cat.score}%` : '0%'
+                        width: isVisible && cat.attempted ? `${cat.score}%` : '0%'
                       }}
                     />
                   </div>
+
 
                 </div>
               );

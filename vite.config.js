@@ -19,7 +19,7 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -36,9 +36,16 @@ export default defineConfig({
             if (id.includes('@vladmandic/face-api')) {
               return 'vendor-faceapi';
             }
+            if (id.includes('html2pdf.js') || id.includes('jspdf') || id.includes('html2canvas')) {
+              return 'vendor-pdf';
+            }
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'vendor-charts';
+            }
           }
         }
       }
     }
   }
 })
+

@@ -12,13 +12,55 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configure CORS (Allows all origins by default for local & Vercel, or custom ALLOWED_ORIGINS)
-allowed_origins = os.getenv('ALLOWED_ORIGINS', '*').strip()
-if allowed_origins and allowed_origins != '*':
-    origins_list = [o.strip() for o in allowed_origins.split(',') if o.strip()]
-    CORS(app, resources={r"/*": {"origins": origins_list}})
-else:
-    CORS(app)
+# Configure CORS with support for Vercel preview domains & explicit origins
+allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '*').strip()
+allowed_origins_list = [
+    r"https://.*\.vercel\.app",
+    r"http://localhost:\d+",
+    r"http://127\.0\.0\.1:\d+"
+]
+if allowed_origins_env and allowed_origins_env != '*':
+    for o in allowed_origins_env.split(','):
+        cleaned = o.strip()
+        if cleaned and cleaned not in allowed_origins_list:
+            allowed_origins_list.append(cleaned)
+
+# Initialize CORS with allowed list
+CORS(app, resources={r"/*": {"origins": "*" if allowed_origins_env == '*' else allowed_origins_list}}, supports_credentials=True)
+
+@app.after_request
+def add_cors_headers(response):
+    """Guarantees CORS headers are attached to EVERY response, including error responses and preflight OPTIONS."""
+    origin = request.headers.get('Origin')
+    if origin:
+        # If wildcard or matches any origin pattern
+        is_allowed = allowed_origins_env == '*' or any(
+            origin == pattern or (isinstance(pattern, str) and re.match(pattern.replace('r"', '').rstrip('"'), origin))
+            for pattern in allowed_origins_list
+        )
+        if is_allowed:
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+    elif allowed_origins_env == '*':
+        response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+@app.errorhandler(Exception)
+def handle_global_exception(e):
+    """Global exception handler returning JSON error with proper status code and CORS headers."""
+    from werkzeug.exceptions import HTTPException
+    code = 500
+    message = str(e)
+    if isinstance(e, HTTPException):
+        code = e.code
+        message = e.description
+    print(f"Global Exception Handler [{code}]: {message}")
+    response = jsonify({"error": message, "statusCode": code})
+    response.status_code = code
+    return response
+
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '').strip()
 
@@ -58,9 +100,45 @@ def call_gemini(prompt: str):
                 return response.text
         except Exception as e:
             print(f"Gemini API Notice for {model_name}: {e}")
-    return None
+def get_company_tier_info(company_name: str) -> dict:
+    name = (company_name or '').lower()
+    if any(k in name for k in ['google', 'amazon', 'netflix', 'meta', 'apple', 'microsoft', 'uber', 'atlassian']):
+        return {
+            'tier': 3,
+            'tierName': 'Tier 3 (FAANG / Top-Tier Product)',
+            'strictnessPrompt': (
+                "COMPANY TIER EVALUATION BAR: TIER 3 (FAANG / TOP-TIER PRODUCT)\n"
+                "- High Expectations: Grade with rigorous FAANG-level standards.\n"
+                "- Algorithmic Efficiency: Require optimal time/space complexity O(N) or O(log N). Strictly mark down brute-force O(N^2) or suboptimal algorithms.\n"
+                "- Code Quality & Architecture: Demand clean abstractions, modular edge case validation, and deep architectural trade-off justification.\n"
+                "- Communication: Expect precise, quantitative, and structured delivery."
+            )
+        }
+    elif any(k in name for k in ['flipkart', 'swiggy', 'paytm', 'adobe', 'zomato', 'razorpay', 'stripe', 'salesforce', 'intuit', 'oracle']):
+        return {
+            'tier': 2,
+            'tierName': 'Tier 2 (Product / Mid-Tier Enterprise)',
+            'strictnessPrompt': (
+                "COMPANY TIER EVALUATION BAR: TIER 2 (PRODUCT / MID-TIER ENTERPRISE)\n"
+                "- Moderate-High Expectations: Grade with mid-tier product standards.\n"
+                "- Algorithmic Efficiency: Prefer optimal solutions, but accept near-optimal approaches with feedback.\n"
+                "- Code Quality & Architecture: Require clean code structure, solid error handling, and good conceptual clarity."
+            )
+        }
+    else:
+        return {
+            'tier': 1,
+            'tierName': 'Tier 1 (Mass Recruiters / IT Services)',
+            'strictnessPrompt': (
+                "COMPANY TIER EVALUATION BAR: TIER 1 (MASS RECRUITERS / IT SERVICES)\n"
+                "- Baseline Expectations: Grade with IT services entry-level standards.\n"
+                "- Algorithmic Efficiency: Focus primarily on functional correctness and passing basic test cases (functional O(N^2) solutions accepted with minor note).\n"
+                "- Fundamentals & Communication: Focus on basic syntax correctness, DBMS/OS fundamentals, and clear spoken communication."
+            )
+        }
 
 @app.route('/health', methods=['GET'])
+
 def health_check():
     return jsonify({
         "status": "online",
@@ -174,74 +252,78 @@ Return this exact JSON structure:
         "note": f"Feedback generated via PlacePrep engine for {company}."
     })
 
-@app.route('/api/analyze-resume', methods=['POST'])
+@app.route('/api/analyze-resume', methods=['POST', 'OPTIONS'])
 def analyze_resume():
-    file = request.files.get('file') or request.files.get('resume')
-    if not file:
-        return jsonify({"error": "No resume PDF file uploaded. Please select a valid PDF file."}), 400
-
-    # Extract target_field safely from JSON, Form Data, or Query Params
-    # Supports target_field (snake_case), targetField, userTargetField
-    raw_target_field = None
-    if request.is_json and request.json:
-        raw_target_field = request.json.get('target_field') or request.json.get('targetField') or request.json.get('userTargetField')
-    else:
-        raw_target_field = (
-            request.form.get('target_field') or
-            request.form.get('targetField') or
-            request.form.get('userTargetField') or
-            request.values.get('target_field') or
-            request.values.get('targetField')
-        )
-
-    # Validation check: If require_target_field parameter is explicitly passed as true
-    strict_validation = False
-    if request.is_json and request.json:
-        strict_validation = str(request.json.get('require_target_field', '')).lower() == 'true'
-    else:
-        strict_validation = str(request.form.get('require_target_field', '') or request.args.get('require_target_field', '')).lower() == 'true'
-
-    if not raw_target_field or not str(raw_target_field).strip():
-        if strict_validation:
-            return jsonify({"error": "target_field is required"}), 400
-        # Fallback default in backend so target_field is always defined and analysis proceeds gracefully
-        target_field = 'Software Development'
-    else:
-        target_field = str(raw_target_field).strip()
-
-    raw_company_name = None
-    if request.is_json and request.json:
-        raw_company_name = request.json.get('company_name') or request.json.get('companyName')
-    else:
-        raw_company_name = (
-            request.form.get('company_name') or
-            request.form.get('companyName') or
-            request.values.get('company_name') or
-            request.values.get('companyName')
-        )
-
-    company_name = (raw_company_name.strip() if raw_company_name else '') or 'Google'
+    if request.method == 'OPTIONS':
+        return '', 200
 
     try:
-        import pdfplumber
-        import io
-        pdf_bytes = io.BytesIO(file.read())
-        extracted_text = ""
-        with pdfplumber.open(pdf_bytes) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    extracted_text += text + "\n"
-    except Exception as e:
-        return jsonify({"error": f"Failed to extract text from PDF: {str(e)}. Please upload a valid text-based PDF."}), 400
+        file = request.files.get('file') or request.files.get('resume')
+        if not file:
+            return jsonify({"error": "No resume PDF file uploaded. Please select a valid PDF file."}), 400
 
-    cleaned_resume_text = extracted_text.strip()
-    if not cleaned_resume_text or len(cleaned_resume_text) < 40:
-        return jsonify({
-            "error": "Could not extract text from this PDF. Please upload a text-based PDF resume rather than a scanned image PDF."
-        }), 400
+        # Extract target_field safely from JSON, Form Data, or Query Params
+        # Supports target_field (snake_case), targetField, userTargetField
+        raw_target_field = None
+        if request.is_json and request.json:
+            raw_target_field = request.json.get('target_field') or request.json.get('targetField') or request.json.get('userTargetField')
+        else:
+            raw_target_field = (
+                request.form.get('target_field') or
+                request.form.get('targetField') or
+                request.form.get('userTargetField') or
+                request.values.get('target_field') or
+                request.values.get('targetField')
+            )
 
-    prompt = f"""You are an experienced technical recruiter and ATS resume auditor evaluating a candidate targeting {target_field} roles at companies like {company_name}.
+        # Validation check: If require_target_field parameter is explicitly passed as true
+        strict_validation = False
+        if request.is_json and request.json:
+            strict_validation = str(request.json.get('require_target_field', '')).lower() == 'true'
+        else:
+            strict_validation = str(request.form.get('require_target_field', '') or request.args.get('require_target_field', '')).lower() == 'true'
+
+        if not raw_target_field or not str(raw_target_field).strip():
+            if strict_validation:
+                return jsonify({"error": "target_field is required"}), 400
+            # Fallback default in backend so target_field is always defined and analysis proceeds gracefully
+            target_field = 'Software Development'
+        else:
+            target_field = str(raw_target_field).strip()
+
+        raw_company_name = None
+        if request.is_json and request.json:
+            raw_company_name = request.json.get('company_name') or request.json.get('companyName')
+        else:
+            raw_company_name = (
+                request.form.get('company_name') or
+                request.form.get('companyName') or
+                request.values.get('company_name') or
+                request.values.get('companyName')
+            )
+
+        company_name = (raw_company_name.strip() if raw_company_name else '') or 'Google'
+
+        try:
+            import pdfplumber
+            import io
+            pdf_bytes = io.BytesIO(file.read())
+            extracted_text = ""
+            with pdfplumber.open(pdf_bytes) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        extracted_text += text + "\n"
+        except Exception as e:
+            return jsonify({"error": f"Failed to extract text from PDF: {str(e)}. Please upload a valid text-based PDF."}), 400
+
+        cleaned_resume_text = extracted_text.strip()
+        if not cleaned_resume_text or len(cleaned_resume_text) < 40:
+            return jsonify({
+                "error": "Could not extract text from this PDF. Please upload a text-based PDF resume rather than a scanned image PDF."
+            }), 400
+
+        prompt = f"""You are an experienced technical recruiter and ATS resume auditor evaluating a candidate targeting {target_field} roles at companies like {company_name}.
 Analyze the following candidate's resume text:
 
 --- RESUME TEXT START ---
@@ -280,66 +362,73 @@ Return this exact JSON structure:
 }}
 """
 
-    raw_text = call_gemini(prompt)
-    if raw_text:
-        try:
-            cleaned_text = clean_json_response(raw_text)
-            parsed_json = json.loads(cleaned_text)
-            return jsonify(parsed_json)
-        except Exception as e:
-            print(f"Gemini API Exception in analyze_resume: {e}")
+        raw_text = call_gemini(prompt)
+        if raw_text:
+            try:
+                cleaned_text = clean_json_response(raw_text)
+                parsed_json = json.loads(cleaned_text)
+                return jsonify(parsed_json)
+            except Exception as e:
+                print(f"Gemini API Exception in analyze_resume: {e}")
 
-    # Solid heuristic fallback response if Gemini client is unconfigured or fails
-    lines = [l.strip() for l in cleaned_resume_text.split('\n') if l.strip()]
-    extracted_skills = []
-    extracted_projects = []
-    extracted_experience = []
-    
-    for line in lines:
-        if any(kw in line.lower() for kw in ['skill', 'python', 'java', 'react', 'javascript', 'sql', 'c++', 'aws', 'docker', 'git', 'node', 'flask', 'api']):
-            if len(line) < 120 and line not in extracted_skills:
-                extracted_skills.append(line)
-        elif any(kw in line.lower() for kw in ['project', 'app', 'system', 'platform', 'tool', 'portal', 'dashboard', 'ai']):
-            if len(line) < 150 and line not in extracted_projects:
-                extracted_projects.append(line)
-        elif any(kw in line.lower() for kw in ['intern', 'engineer', 'developer', 'company', 'inc', 'tech', 'ltd']):
-            if len(line) < 150 and line not in extracted_experience:
-                extracted_experience.append(line)
+        # Solid heuristic fallback response if Gemini client is unconfigured or fails
+        lines = [l.strip() for l in cleaned_resume_text.split('\n') if l.strip()]
+        extracted_skills = []
+        extracted_projects = []
+        extracted_experience = []
+        
+        for line in lines:
+            if any(kw in line.lower() for kw in ['skill', 'python', 'java', 'react', 'javascript', 'sql', 'c++', 'aws', 'docker', 'git', 'node', 'flask', 'api']):
+                if len(line) < 120 and line not in extracted_skills:
+                    extracted_skills.append(line)
+            elif any(kw in line.lower() for kw in ['project', 'app', 'system', 'platform', 'tool', 'portal', 'dashboard', 'ai']):
+                if len(line) < 150 and line not in extracted_projects:
+                    extracted_projects.append(line)
+            elif any(kw in line.lower() for kw in ['intern', 'engineer', 'developer', 'company', 'inc', 'tech', 'ltd']):
+                if len(line) < 150 and line not in extracted_experience:
+                    extracted_experience.append(line)
 
-    return jsonify({
-        "atsScore": 82,
-        "overallImpression": f"Your resume demonstrates clear technical direction for {target_field} roles targeting companies like {company_name}. With stronger quantified metric bullet points and targeted cloud/system keywords, your ATS score will reach tier-1 benchmark level.",
-        "strengths": [
-            f"Included relevant technical projects and skills tailored to {target_field}.",
-            "Clean layout structure that parses well across standard ATS optical parsers.",
-            f"Clear academic background and project highlights."
-        ],
-        "weaknesses": [
-            {
-                "issue": "Experience bullets focus on daily responsibilities rather than measurable business impact",
-                "example": lines[min(3, len(lines)-1)] if lines else "Developed software components for web application",
-                "suggestion": "Quantify outcomes (e.g. 'Improved API response latency by 35%' or 'Scaled platform to 10k monthly active users')",
-                "severity": "high"
-            },
-            {
-                "issue": "Missing explicit cloud infrastructure and automated CI/CD pipeline keywords",
-                "example": "Project section lists frameworks but lacks deployment details",
-                "suggestion": "Add containerization and deployment tools like Docker, AWS, or GitHub Actions",
-                "severity": "medium"
+        return jsonify({
+            "atsScore": 82,
+            "overallImpression": f"Your resume demonstrates clear technical direction for {target_field} roles targeting companies like {company_name}. With stronger quantified metric bullet points and targeted cloud/system keywords, your ATS score will reach tier-1 benchmark level.",
+            "strengths": [
+                f"Included relevant technical projects and skills tailored to {target_field}.",
+                "Clean layout structure that parses well across standard ATS optical parsers.",
+                f"Clear academic background and project highlights."
+            ],
+            "weaknesses": [
+                {
+                    "issue": "Experience bullets focus on daily responsibilities rather than measurable business impact",
+                    "example": lines[min(3, len(lines)-1)] if lines else "Developed software components for web application",
+                    "suggestion": "Quantify outcomes (e.g. 'Improved API response latency by 35%' or 'Scaled platform to 10k monthly active users')",
+                    "severity": "high"
+                },
+                {
+                    "issue": "Missing explicit cloud infrastructure and automated CI/CD pipeline keywords",
+                    "example": "Project section lists frameworks but lacks deployment details",
+                    "suggestion": "Add containerization and deployment tools like Docker, AWS, or GitHub Actions",
+                    "severity": "medium"
+                }
+            ],
+            "missingKeywords": ["Docker", "CI/CD", "AWS / Cloud", "Microservices", "Unit Testing"],
+            "extractedProfile": {
+                "skills": extracted_skills[:6] if extracted_skills else ["JavaScript", "Python", "React", "SQL", "Git"],
+                "projects": extracted_projects[:4] if extracted_projects else ["Full-Stack Web Portal", "Machine Learning Analytics Engine"],
+                "experience": extracted_experience[:3] if extracted_experience else ["Software Engineering Intern"],
+                "educationSummary": "Bachelor of Technology in Computer Science & Engineering"
             }
-        ],
-        "missingKeywords": ["Docker", "CI/CD", "AWS / Cloud", "Microservices", "Unit Testing"],
-        "extractedProfile": {
-            "skills": extracted_skills[:6] if extracted_skills else ["JavaScript", "Python", "React", "SQL", "Git"],
-            "projects": extracted_projects[:4] if extracted_projects else ["Full-Stack Web Portal", "Machine Learning Analytics Engine"],
-            "experience": extracted_experience[:3] if extracted_experience else ["Software Engineering Intern"],
-            "educationSummary": "Bachelor of Technology in Computer Science & Engineering"
-        }
-    })
+        })
+    except Exception as outer_err:
+        print(f"Unhandled Exception in analyze_resume: {str(outer_err)}")
+        return jsonify({"error": f"Server error processing resume: {str(outer_err)}"}), 500
 
-@app.route('/api/generate-resume-interview-questions', methods=['POST'])
+
+@app.route('/api/generate-resume-interview-questions', methods=['POST', 'OPTIONS'])
 def generate_resume_interview_questions():
+    if request.method == 'OPTIONS':
+        return '', 200
     import random
+
     data = request.get_json() or {}
     extracted_profile = data.get('extractedProfile', {})
     company_name = data.get('selectedCompany', 'Google')
@@ -1080,7 +1169,9 @@ Return this exact JSON structure:
 def interview_followup():
     data = request.get_json() or {}
     company_name = data.get('selectedCompany', 'Google')
+    tier_info = get_company_tier_info(company_name)
     target_field = data.get('targetField', 'Software Development')
+
     interview_type = data.get('interviewType', 'technical')  # 'technical' | 'hr'
     experience_level = data.get('experienceLevel', 'Fresher')
     experience_years = data.get('experienceYears', '0-2')
@@ -1173,6 +1264,8 @@ def interview_followup():
 
     prompt = f"""You are {role_description}
 
+{tier_info['strictnessPrompt']}
+
 CANDIDATE PROFILE:
 - Target Field: {target_field}
 - Experience Level: {experience_level} ({experience_years} years)
@@ -1188,35 +1281,39 @@ LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
 FULL CONVERSATION HISTORY SO FAR:
 {history_block}
 
-LATEST CANDIDATE ANSWER TO RESPOND TO:
+LATEST CANDIDATE ANSWER TO EVALUATE:
 "{latest_candidate_answer}"
 
 CURRENT TOPIC FOLLOW-UP COUNT: {topic_followup_count} / {max_followups} max limit.
 NEXT PLANNED QUESTION FROM QUESTION BANK: "{next_planned_question}"
 
-CRITICAL ADAPTIVE FOLLOW-UP RULES:
-1. You MUST carefully analyze the candidate's latest response: "{latest_candidate_answer}".
-2. YOUR FOLLOW-UP QUESTION MUST BE DIRECTLY BASED ON WHAT THE CANDIDATE JUST SAID.
-   - If the candidate mentioned specific technologies, frameworks, metrics, projects, or experiences (e.g. "Redis", "FastAPI", "reduced latency by 40%", "handled conflict in team"), YOUR QUESTION MUST EXPLICITLY REFERENCE those exact details.
-   - If the candidate's answer was brief, vague, or missing key details (e.g. "I built APIs"), YOUR QUESTION MUST PROBE SPECIFICALLY into that vagueness (e.g. "Which protocol did you use for your APIs, REST or GraphQL, and how did you handle rate limiting?").
-   - DO NOT generate a static, canned, or unrelated question.
-3. DECISION CRITERIA:
-   - If topicFollowupCount < {max_followups} AND there are details/gaps in their latest answer to probe:
-     Set action = "followup".
-     Formulate a direct, probing follow-up question referencing their exact words/concepts.
-   - If topicFollowupCount >= {max_followups} OR the candidate's answer was thorough & complete:
-     Set action = "next_question".
-     Weave a 1-sentence personalized transition acknowledging their specific answer before asking the NEXT PLANNED QUESTION: "{next_planned_question}".
+CRITICAL CONVERSATIONAL INTERVIEWER INSTRUCTIONS:
+1. STEP 1 - ANALYZE THE CANDIDATE'S LATEST ANSWER:
+   - Carefully inspect "{latest_candidate_answer}". Identify specific technical terms, claims, algorithms, tools, numbers, or statements made by the candidate.
+   - Evaluate technical accuracy, depth, and missing edge cases against {company_name} ({tier_info['tierName']}) hiring standards.
+
+2. STEP 2 - DETERMINE INTERVIEWER ACTION:
+   - OPTION A (CHALLENGE / CLARIFY): If the answer was partially incorrect, vague, or missing crucial trade-offs (e.g. candidate claimed O(1) without mentioning hash collisions, or claimed BST lookup is always O(log N) without checking balance):
+     Set action = "followup" (if topicFollowupCount < {max_followups}). Formulate a direct, sharp cross-question pointing out the exact phrase/claim and asking them to clarify or fix the logic.
+   - OPTION B (DEEP PROBE): If the answer was correct but high-level (e.g. candidate mentioned "used Redis cache" or "used binary search"):
+     Set action = "followup" (if topicFollowupCount < {max_followups}). Formulate a follow-up probing deeper into internal mechanics, memory/concurrency overhead, or failure modes.
+   - OPTION C (TRANSITION): If candidate's answer was complete and accurate, OR if topicFollowupCount >= {max_followups}:
+     Set action = "next_question". Formulate a natural 1-sentence conversational transition referencing their exact answer before smoothly introducing the next planned topic: "{next_planned_question}".
+
+3. MANDATORY CITATION RULE:
+   - Your generated questionText MUST explicitly quote or cite at least one specific phrase or concept directly from the candidate's answer: "{latest_candidate_answer}".
+   - Example quote patterns: "You mentioned that...", "Regarding your point on...", "You noted that [concept]...".
 
 4. Return ONLY valid raw JSON with NO markdown code blocks, NO ```json preamble.
 
 JSON Structure Required:
 {{
   "action": "followup" or "next_question",
-  "questionText": "Your adaptively generated question or transition + next planned question",
-  "reasoning": "Internal rationale explaining how this question specifically connects to details in: '{latest_candidate_answer[:80]}...'"
+  "questionText": "Conversational follow-up or transition question directly quoting/referencing the candidate's actual answer",
+  "reasoning": "Brief analysis of candidate's answer correctness/gaps explaining why this question was chosen."
 }}
 """
+
 
     print(f"[Backend Debug] Sending prompt to Gemini...")
     raw_text = call_gemini(prompt)
@@ -1352,6 +1449,7 @@ Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, 
 def evaluate_system_design():
     data = request.get_json() or {}
     company_name = data.get('selectedCompany', 'Google')
+    tier_info = get_company_tier_info(company_name)
     problem_title = data.get('problemTitle', 'Design a Scalable Distributed URL Shortener')
     diagram_nodes = data.get('diagramNodes', [])
     diagram_edges = data.get('diagramEdges', [])
@@ -1362,6 +1460,8 @@ def evaluate_system_design():
     edges_summary = ", ".join([f"{e.get('source')} -> {e.get('target')}" for e.get in [diagram_edges] if isinstance(e, dict)] if isinstance(diagram_edges, list) else []) or f"{len(diagram_edges)} connections drawn."
 
     prompt = f"""You are a Principal Systems Architect at {company_name} evaluating a candidate's System Design interview.
+
+{tier_info['strictnessPrompt']}
 
 SYSTEM DESIGN CHALLENGE: "{problem_title}"
 EXPECTED COMPONENT CHECKLIST: {", ".join(expected_checklist)}
@@ -1378,7 +1478,7 @@ CANDIDATE VERBAL EXPLANATION & TRADE-OFF RATIONALE:
 EVALUATION TASK:
 1. Assess component checklist coverage (did candidate include Load Balancers, Caching, Storage, Queues, CDNs?).
 2. Assess trade-off awareness (SQL vs NoSQL, sync vs async, caching strategies, scalability bottlenecks).
-3. Evaluate verbal explanation clarity and architectural depth.
+3. Evaluate verbal explanation clarity and architectural depth against {tier_info['tierName']} expectations.
 
 Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble:
 {{
@@ -1420,12 +1520,15 @@ def generate_sample_answer():
     question_text = data.get('questionText', '')
     user_transcript = data.get('userTranscript', '')
     company_name = data.get('companyName', 'Google')
+    tier_info = get_company_tier_info(company_name)
     target_field = data.get('targetField', 'Software Development')
     difficulty_level = data.get('difficultyLevel', 'Medium')
     experience_level = data.get('experienceLevel', 'Fresher')
     interview_type = data.get('interviewType', 'technical')
 
     prompt = f"""You are a principal interviewer at {company_name} evaluating a candidate for a {target_field} position ({experience_level} level, {difficulty_level} difficulty).
+
+{tier_info['strictnessPrompt']}
 
 INTERVIEW QUESTION:
 "{question_text}"
@@ -1434,7 +1537,7 @@ CANDIDATE'S SPOKEN RESPONSE:
 "{user_transcript}"
 
 CRITICAL INSTRUCTIONS:
-1. Generate a realistic, believable "strong sample answer" for this question. It should sound like a top 5% candidate interviewing at {company_name} — structured, concise, natural (not overly robotic or artificial), incorporating clear examples and measurable results.
+1. Generate a realistic, believable "strong sample answer" for this question. It should sound like a top 5% candidate interviewing at {company_name} ({tier_info['tierName']}) — structured, concise, natural (not overly robotic or artificial), incorporating clear examples and measurable results.
 2. Provide a 1-2 line "diffExplanation" highlighting what the sample answer includes that the candidate's actual answer missed (e.g. "Sample quantifies impact with numbers, your answer described the approach but not the outcome").
 3. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
 
@@ -1444,6 +1547,7 @@ Return this exact JSON structure:
   "diffExplanation": "1-2 sentence comparison explaining key differences and missing elements."
 }}
 """
+
 
     if genai_client:
         try:
@@ -1526,6 +1630,8 @@ def analyze_code_complexity():
     data = request.get_json() or {}
     code = data.get('code', '')
     language = data.get('language', 'javascript')
+    company_name = data.get('companyName') or data.get('selectedCompany', 'Google')
+    tier_info = get_company_tier_info(company_name)
     question_id = data.get('questionId', 'default')
     execution_time_ms = data.get('executionTimeMs', 28)
     memory_used_kb = data.get('memoryUsedKb', 14200)
@@ -1533,13 +1639,15 @@ def analyze_code_complexity():
 
     runtime_pct, memory_pct = compute_submission_percentiles(question_id, execution_time_ms, memory_used_kb)
 
-    prompt = f"""You are a Senior Computer Science Algorithms Engineer & Static Code Analyzer.
-Analyze the Big-O time and space complexity of the submitted candidate solution code below.
+    prompt = f"""You are a Senior Computer Science Algorithms Engineer & Static Code Analyzer evaluating code for {company_name} ({tier_info['tierName']}).
+
+{tier_info['strictnessPrompt']}
 
 SUBMITTED SOLUTION CODE ({language.upper()}):
 ```{language}
 {code}
 ```
+
 
 EXPECTED OPTIMAL COMPLEXITY FOR THIS PROBLEM: "{optimal_complexity}"
 
@@ -1733,25 +1841,27 @@ def generate_final_report():
     # Dynamic Weight Normalization across Active Sub-Scores
     active_keys = [k for k, v in sub_scores.items() if v['active']]
     if not active_keys:
-        active_keys = ['technicalKnowledge', 'communication', 'problemSolving']
-        sub_scores['technicalKnowledge'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
-        sub_scores['communication'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
-        sub_scores['problemSolving'] = {'score': 8.0, 'active': True, 'notes': 'Baseline estimation'}
+        overall_interview_score = 0
+        calculated_readiness_score = 0
+    else:
+        sum_active_weights = sum(sub_score_definitions[k]['weight'] for k in active_keys)
+        overall_score = 0.0
 
-    sum_active_weights = sum(sub_score_definitions[k]['weight'] for k in active_keys)
-    overall_score = 0.0
+        for k in active_keys:
+            norm_weight = sub_score_definitions[k]['weight'] / sum_active_weights
+            overall_score += (sub_scores[k]['score'] * 10.0) * norm_weight
 
-    for k in active_keys:
-        norm_weight = sub_score_definitions[k]['weight'] / sum_active_weights
-        overall_score += (sub_scores[k]['score'] * 10.0) * norm_weight
+        overall_interview_score = int(round(overall_score))
+        overall_interview_score = max(0, min(100, overall_interview_score))
+        calculated_readiness_score = overall_interview_score
 
-    overall_interview_score = int(round(overall_score))
-    overall_interview_score = max(0, min(100, overall_interview_score))
-    calculated_readiness_score = overall_interview_score
+
+    tier_info = get_company_tier_info(company_name)
 
     session_summary_json = json.dumps({
         "companyName": company_name,
         "fieldName": field_name,
+        "companyTier": tier_info['tierName'],
         "difficultyLevel": difficulty_level,
         "experienceLevel": experience_level,
         "experienceYears": experience_years,
@@ -1769,7 +1879,9 @@ def generate_final_report():
         else:
             dsa_complexity_context = f"\nDSA CODE COMPLEXITY NOTICE: Candidate submitted an OPTIMAL complexity solution ({dsa_results.get('timeComplexity', 'O(N)')})."
 
-    prompt = f"""You are the Chief Placement Officer evaluating a candidate's complete 7-stage placement simulation drive.
+    prompt = f"""You are the Chief Placement Officer evaluating a candidate's complete 7-stage placement simulation drive benchmarked against {company_name} ({tier_info['tierName']}).
+
+{tier_info['strictnessPrompt']}
 
 SESSION PERFORMANCE DATA:
 {session_summary_json}
@@ -1779,7 +1891,7 @@ CRITICAL INSTRUCTIONS:
 1. Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
 2. Calculate/confirm a realistic readinessScore (around {calculated_readiness_score}).
 3. Provide a concise, highly professional 'readinessLabel' (e.g. "Placement Ready — Top 5% Candidate", "Strong Technical Fit — Communication Polish Needed", "Developing — High Growth Potential").
-4. Provide an 'executiveSummary' (3-4 sentences summarizing their performance across all completed rounds, overall hire probability, and key technical traits).
+4. Provide an 'executiveSummary' (3-4 sentences summarizing their performance across all completed rounds, overall hire probability, and key technical traits against {tier_info['tierName']} standards).
 5. Provide a 'roundBreakdown' array of objects, one per completed round in completedRounds ({list(active_rounds.keys())}), with roundName, score, and oneLineTakeaway.
 6. Provide 'topPriorityActions': array of top 3 actionable steps to increase candidate hire probability.
 7. Provide 'encouragingClosingNote': a short (2 sentence) inspiring closing message motivating the candidate.
@@ -1814,6 +1926,7 @@ Return this exact JSON structure:
             raw_text = response.text
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
+            parsed_json["companyTierInfo"] = tier_info
             return jsonify(parsed_json)
         except Exception as e:
             print(f"Gemini API Exception in generate_final_report: {e}")
@@ -1837,9 +1950,10 @@ Return this exact JSON structure:
     return jsonify({
         "readinessScore": calculated_readiness_score,
         "overallInterviewScore": calculated_readiness_score,
+        "companyTierInfo": tier_info,
         "subScores": sub_scores,
-        "readinessLabel": "Strong Candidate — Tier-1 Ready" if calculated_readiness_score >= 80 else "Developing Candidate — Targeted Polish Needed",
-        "executiveSummary": f"Candidate completed the {company_name} placement drive for {field_name} (taken at {difficulty_level} difficulty, {experience_level} level) with an overall interview score of {calculated_readiness_score}/100. Performance across technical and behavioral rounds shows solid competency.",
+        "readinessLabel": f"Strong Candidate — {tier_info['tierName']} Benchmark" if calculated_readiness_score >= 75 else "Developing Candidate — Targeted Polish Needed",
+        "executiveSummary": f"Candidate completed the {company_name} ({tier_info['tierName']}) placement drive for {field_name} with an overall interview score of {calculated_readiness_score}/100. Performance evaluated against {tier_info['tierName']} hiring standards.",
         "roundBreakdown": breakdown,
         "topPriorityActions": [
           f"Master company-specific interview question patterns for {company_name}.",
@@ -1848,6 +1962,7 @@ Return this exact JSON structure:
         ],
         "encouragingClosingNote": "Solid performance! Keep refining your core technical domains and communication drive."
     })
+
 
 
 if __name__ == '__main__':

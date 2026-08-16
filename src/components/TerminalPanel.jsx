@@ -13,8 +13,10 @@ import {
   Minimize2, 
   Check, 
   X,
-  Code
+  Code,
+  RefreshCw
 } from 'lucide-react';
+
 
 export default function TerminalPanel({
   isRunning = false,
@@ -207,16 +209,27 @@ export default function TerminalPanel({
 
             {/* Execution Global Error */}
             {executionError && (
-              <div className="p-3 rounded bg-red-950/60 border border-red-800/80 text-red-300 space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-red-400">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Execution Exception Encountered:</span>
+              <div className="p-3.5 rounded bg-red-950/70 border border-red-800/80 text-red-300 space-y-2.5">
+                <div className="font-bold flex items-center justify-between text-red-400">
+                  <span className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>Execution Exception / Service Notice:</span>
+                  </span>
+                  <button
+                    onClick={onRunCode}
+                    disabled={isRunning}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-red-800 hover:bg-red-700 text-white font-bold text-xs transition-colors shadow disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRunning ? 'animate-spin' : ''}`} />
+                    <span>Retry Code Execution</span>
+                  </button>
                 </div>
                 <pre className="whitespace-pre-wrap font-mono text-xs text-red-300 pt-1">
                   {executionError}
                 </pre>
               </div>
             )}
+
 
             {/* If no execution result yet */}
             {!executionResult && !executionError && (

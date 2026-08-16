@@ -682,76 +682,100 @@ function runWithLocalJS(sourceCode, language, input, expectedOutput) {
 
 import { getBackendUrl } from '../config/api';
 
-const FLASK_RUN_CODE_URL = `${getBackendUrl()}/api/run-code`;
-
 /**
  * Execute single test case by routing through Flask backend (which calls Judge0 CE server-side, bypassing browser CORS)
  */
 async function runWithFlaskBackend(sourceCode, language, input, expectedOutput) {
   const executableCode = buildExecutableCode(sourceCode, language, input);
+  const targetUrl = `${getBackendUrl()}/api/run-code`;
 
-  console.log(`[CodeExecution] Sending request to Flask backend (${FLASK_RUN_CODE_URL})...`);
-  const response = await fetch(FLASK_RUN_CODE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      code: executableCode,
-      language: language,
-      stdin: input || '',
-      expected_output: expectedOutput || ''
-    })
-  });
+  console.log(`[CodeExecution] Sending request to Flask backend (${targetUrl})...`);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 40000); // 40-second timeout for Render cold starts
 
-  if (!response.ok) {
-    throw new Error(`Flask execution endpoint returned HTTP ${response.status}`);
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: executableCode,
+        language: language,
+        stdin: input || '',
+        expected_output: expectedOutput || ''
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.status === 429) {
+      throw new Error('Judge0 code execution service is temporarily busy due to rate limits. Please wait a few seconds and try again.');
+    }
+
+    if (!response.ok) {
+      throw new Error(`Backend execution endpoint returned HTTP ${response.status}`);
+    }
+
+    const res = await response.json();
+    console.log('[CodeExecution] Raw response from Flask /api/run-code:', res);
+
+    if (!res.success && res.error) {
+      if (res.error.toLowerCase().includes('rate limit') || res.error.includes('429')) {
+        throw new Error('Judge0 service is temporarily busy, please try again in a moment.');
+      }
+      throw new Error(res.error);
+    }
+
+    const stdout = (res.stdout || '').trim();
+    const stderr = (res.stderr || '').trim();
+    const statusDescription = res.status || 'Executed';
+
+    const isTimeLimit = statusDescription.includes('Time Limit');
+    const isCompileErr = statusDescription.includes('Compilation');
+    const isRuntimeErr = statusDescription.includes('Runtime') || (stderr && !stdout);
+
+    let status = 'Accepted';
+    let passed = false;
+
+    if (isTimeLimit) {
+      status = 'Time Limit Exceeded';
+      passed = false;
+    } else if (isCompileErr) {
+      status = 'Compilation Error';
+      passed = false;
+    } else if (isRuntimeErr) {
+      status = 'Runtime Error';
+      passed = false;
+    } else {
+      const normActual = stdout.replace(/\s+/g, ' ').trim().toLowerCase();
+      const normExpected = (expectedOutput || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      passed = (stdout === (expectedOutput || '').trim()) || (normActual !== '' && normExpected !== '' && normActual === normExpected);
+      status = passed ? 'Accepted' : 'Wrong Answer';
+    }
+
+    return {
+      success: passed,
+      passed: passed,
+      status: status,
+      stdout: stdout,
+      stderr: stderr,
+      time: res.execution_time ? `${Math.round(parseFloat(res.execution_time) * 1000)} ms` : '15 ms',
+      memory: res.memory ? `${(res.memory / 1024).toFixed(1)} MB` : '12.4 MB',
+      input: input || '',
+      expectedOutput: expectedOutput || '',
+      actualOutput: isTimeLimit ? 'Time Limit Exceeded' : (stderr ? stderr : stdout)
+    };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`Waking up backend server at ${targetUrl} (Render free tier cold start)... Please click retry in a few seconds.`);
+    }
+    if (err.message === 'Failed to fetch' || err.message.includes('fetch')) {
+      throw new Error(`Failed to reach backend at ${targetUrl}. Verify VITE_BACKEND_URL in Vercel settings.`);
+    }
+    throw err;
   }
-
-  const res = await response.json();
-  console.log('[CodeExecution] Raw response from Flask /api/run-code:', res);
-
-  if (!res.success && res.error) {
-    throw new Error(res.error);
-  }
-
-  const stdout = (res.stdout || '').trim();
-  const stderr = (res.stderr || '').trim();
-  const statusDescription = res.status || 'Executed';
-
-  const isTimeLimit = statusDescription.includes('Time Limit');
-  const isCompileErr = statusDescription.includes('Compilation');
-  const isRuntimeErr = statusDescription.includes('Runtime') || (stderr && !stdout);
-
-  let status = 'Accepted';
-  let passed = false;
-
-  if (isTimeLimit) {
-    status = 'Time Limit Exceeded';
-    passed = false;
-  } else if (isCompileErr) {
-    status = 'Compilation Error';
-    passed = false;
-  } else if (isRuntimeErr) {
-    status = 'Runtime Error';
-    passed = false;
-  } else {
-    const normActual = stdout.replace(/\s+/g, ' ').trim().toLowerCase();
-    const normExpected = (expectedOutput || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    passed = (stdout === (expectedOutput || '').trim()) || (normActual !== '' && normExpected !== '' && normActual === normExpected);
-    status = passed ? 'Accepted' : 'Wrong Answer';
-  }
-
-  return {
-    success: passed,
-    passed: passed,
-    status: status,
-    stdout: stdout,
-    stderr: stderr,
-    time: res.execution_time ? `${Math.round(parseFloat(res.execution_time) * 1000)} ms` : '15 ms',
-    memory: res.memory ? `${(res.memory / 1024).toFixed(1)} MB` : '12.4 MB',
-    input: input || '',
-    expectedOutput: expectedOutput || '',
-    actualOutput: isTimeLimit ? 'Time Limit Exceeded' : (stderr ? stderr : stdout)
-  };
 }
 
 /**
@@ -759,11 +783,12 @@ async function runWithFlaskBackend(sourceCode, language, input, expectedOutput) 
  * Flask Backend (Server-side Judge0) -> Direct Judge0 -> Direct Piston -> Local JS (JS only) -> Infrastructure Error
  */
 export async function executeSingleTestCase(sourceCode, language, input, expectedOutput) {
+  const currentBackendUrl = `${getBackendUrl()}/api/run-code`;
   console.log(`[CodeExecution] Start test execution: language="${language}", input="${input}", expected="${expectedOutput}"`);
 
   // Step 1: Flask Backend API (bypasses browser CORS & connects directly to Judge0 CE)
   try {
-    console.log(`[CodeExecution] Step 1: Attempting Flask Backend API at ${FLASK_RUN_CODE_URL}`);
+    console.log(`[CodeExecution] Step 1: Attempting Flask Backend API at ${currentBackendUrl}`);
     const result = await runWithFlaskBackend(sourceCode, language, input, expectedOutput);
     console.log('[CodeExecution] Step 1 SUCCESS (Flask Backend):', result);
     return result;
@@ -802,7 +827,7 @@ export async function executeSingleTestCase(sourceCode, language, input, expecte
           passed: null, // null indicates infrastructure error, NOT wrong answer!
           status: 'Execution Engine Unavailable',
           stdout: '',
-          stderr: `Could not execute ${language} code — all execution services are currently unavailable (Flask: ${backendErr.message}, Judge0: ${judge0Err.message}, Piston: ${pistonErr.message}). Please check backend server at ${FLASK_RUN_CODE_URL} and network connection.`,
+          stderr: `Could not execute ${language} code — execution services are currently busy or unavailable (Backend: ${backendErr.message}, Judge0: ${judge0Err.message}, Piston: ${pistonErr.message}). Please click "Retry Code Execution".`,
           time: '0 ms',
           memory: '0 MB',
           input: input || '',
@@ -813,6 +838,7 @@ export async function executeSingleTestCase(sourceCode, language, input, expecte
     }
   }
 }
+
 
 /**
  * Execute batch test cases against source code

@@ -263,13 +263,29 @@ export default function HrInterviewRoundPage() {
     }
   }, []);
 
+  const ttsTimerRef = useRef(null);
+
   const triggerAISpeech = (text) => {
+    if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
     setAiState('speaking');
+    
+    // Safety fallback: Ensure aiState resets to 'idle' after 12s even if TTS onend event fails
+    ttsTimerRef.current = setTimeout(() => {
+      setAiState('idle');
+    }, 12000);
+
     speakText({
       text,
       langCode: selectedLanguage?.code || 'en-US',
       onStart: () => setAiState('speaking'),
-      onEnd: () => setAiState('idle')
+      onEnd: () => {
+        if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+        setAiState('idle');
+      },
+      onError: () => {
+        if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+        setAiState('idle');
+      }
     });
   };
 
@@ -312,7 +328,7 @@ export default function HrInterviewRoundPage() {
     const capturedText = (transcriptRef.current || liveTranscript).trim();
 
     console.log('\n=================== [INTERVIEW DEBUG: HR ROUND] ===================');
-    console.log('[Interview Debug: HR] Step 1 - Transcript captured:', `"${capturedText}"`);
+    console.log(`[Interview Debug: HR] Step 1 - Transcript captured for Q${questionIdx + 1}:`, `"${capturedText}"`);
     if (!capturedText) {
       console.warn('[Interview Debug: HR] WARNING: Captured transcript is empty! Mic input may not have registered.');
     }
@@ -353,7 +369,6 @@ export default function HrInterviewRoundPage() {
     });
 
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-
     const nextBankQ = questionsBank[questionIdx + 1] || questionsBank[0];
 
     const payload = {
@@ -371,59 +386,58 @@ export default function HrInterviewRoundPage() {
 
     console.log('[Interview Debug: HR] Step 2 - Payload sent to /api/interview-followup:', payload);
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 25000); // 25s timeout for cold start tolerance
+
+    let backendNextQ = null;
+    let isFollowup = false;
+
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+
+      clearTimeout(fetchTimeout);
 
       if (response.ok) {
         const data = await response.json();
         console.log('[Interview Debug: HR] Step 3 - Gemini response received:', data);
-
         if (data.action === 'followup' && topicFollowupCount < 2) {
-          setTopicFollowupCount(prev => prev + 1);
-          const nextQText = data.questionText;
-          console.log('[Interview Debug: HR] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', nextQText);
-
-          setCurrentSpokenQuestion(nextQText);
-          setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-          triggerAISpeech(nextQText);
-          return;
+          isFollowup = true;
+          backendNextQ = data.questionText;
         } else if (data.questionText) {
-          // Adaptive next question transition from Gemini
-          const nextIdx = questionIdx + 1;
-          if (nextIdx < questionsBank.length) {
-            setQuestionIdx(nextIdx);
-            setTopicFollowupCount(0);
-            const nextQText = data.questionText;
-            console.log('[Interview Debug: HR] Step 4 - Rendering & speaking ADAPTIVE NEXT QUESTION:', nextQText);
-
-            setCurrentSpokenQuestion(nextQText);
-            setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-            triggerAISpeech(nextQText);
-            return;
-          }
+          backendNextQ = data.questionText;
         }
       }
     } catch (err) {
-      console.warn('HR follow-up endpoint notice:', err.message);
+      clearTimeout(fetchTimeout);
+      console.warn('[Interview Debug: HR] Backend follow-up notice (using fallback):', err.message);
     }
 
-    // Default progression fallback
-    if (questionIdx < questionsBank.length - 1) {
+    // Progression logic & state updates
+    if (isFollowup && backendNextQ) {
+      setTopicFollowupCount(prev => prev + 1);
+      console.log(`[Interview Debug: HR] Step 4 - Advancing with ADAPTIVE FOLLOW-UP for Q${questionIdx + 1}:`, backendNextQ);
+      setCurrentSpokenQuestion(backendNextQ);
+      setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
+      triggerAISpeech(backendNextQ);
+    } else if (questionIdx < questionsBank.length - 1) {
       const nextIdx = questionIdx + 1;
       setQuestionIdx(nextIdx);
       setTopicFollowupCount(0);
-      const nextQ = questionsBank[nextIdx];
-      const nextText = `Thank you for sharing that. Let's move on to our next HR topic: ${nextQ.question}`;
+      const nextQObj = questionsBank[nextIdx];
+      const nextText = backendNextQ || `Thank you for sharing that. Let's move on to our next HR topic: ${nextQObj.question}`;
       
+      console.log(`[Interview Debug: HR] Step 4 - Advancing from Q${questionIdx + 1} to Q${nextIdx + 1} of ${questionsBank.length}:`, nextText);
       setCurrentSpokenQuestion(nextText);
       setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
       triggerAISpeech(nextText);
     } else {
       const finalText = `Thank you! That completes Stage 6 — HR & Culture Fit Interview for ${companyName}. I have recorded your responses for the final evaluation.`;
+      console.log(`[Interview Debug: HR] Step 4 - Completed all ${questionsBank.length} questions! Showing final scorecard.`);
       setCurrentSpokenQuestion(finalText);
       triggerAISpeech(finalText);
 
@@ -445,6 +459,7 @@ export default function HrInterviewRoundPage() {
       setIsFinished(true);
     }
   };
+
 
   return (
     <div className="space-y-6 py-2 max-w-6xl mx-auto">
@@ -508,10 +523,19 @@ export default function HrInterviewRoundPage() {
               {/* Live Speech Indicator Overlay */}
               <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between p-3.5 rounded-2xl bg-white/90 backdrop-blur-md border border-warmborder text-xs text-darkcharcoal-900 shadow-warm-sm">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${isAnswering ? 'bg-red-500 animate-ping' : 'bg-leaf-500'}`}></span>
-                  <span className="font-bold">{isAnswering ? 'Recording HR Answer...' : aiState === 'speaking' ? 'HR Interviewer Speaking...' : 'Ready for Response'}</span>
+                  <span className={`w-2.5 h-2.5 rounded-full ${isAnswering ? 'bg-red-500 animate-ping' : aiState === 'thinking' ? 'bg-amber-500 animate-pulse' : 'bg-leaf-500'}`}></span>
+                  <span className="font-bold">
+                    {isAnswering 
+                      ? 'Recording HR Answer...' 
+                      : aiState === 'thinking' 
+                      ? 'Evaluating Response & Advancing...' 
+                      : aiState === 'speaking' 
+                      ? 'HR Interviewer Speaking...' 
+                      : 'Ready for Response'}
+                  </span>
                 </div>
                 {isAnswering && <span className="font-mono text-gold-600 font-bold">{answerDuration}s</span>}
+                {aiState === 'thinking' && <Loader2 className="w-4 h-4 animate-spin text-amber-600" />}
               </div>
             </div>
 
@@ -538,11 +562,20 @@ export default function HrInterviewRoundPage() {
                 <button
                   type="button"
                   onClick={handleStartAnswer}
-                  disabled={aiState === 'speaking'}
+                  disabled={aiState === 'speaking' || aiState === 'thinking'}
                   className="px-6 py-2.5 rounded-full bg-leaf-500 hover:bg-leaf-600 text-white font-extrabold text-xs shadow-warm-md hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center gap-2"
                 >
-                  <Mic className="w-4 h-4" />
-                  <span>Start Microphone Answer</span>
+                  {aiState === 'thinking' ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>AI Evaluating Response...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4" />
+                      <span>Start Microphone Answer</span>
+                    </>
+                  )}
                 </button>
               ) : (
                 <button
@@ -569,9 +602,17 @@ export default function HrInterviewRoundPage() {
                 <span className="text-[10px] text-darkcharcoal-500 font-mono">Stage 6 HR Screen</span>
               </div>
 
+              {aiState === 'thinking' && (
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5 font-semibold animate-pulse">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
+                  <span>Evaluating answer & preparing next scenario... (Waking up backend server if cold starting)</span>
+                </div>
+              )}
+
               <h3 className="text-base font-bold font-serif text-darkcharcoal-900 leading-relaxed">
                 {currentSpokenQuestion || questionsBank[questionIdx]?.question}
               </h3>
+
 
               <div className="pt-2">
                 <label className="text-[11px] font-bold text-leaf-600 block mb-1">Live Audio Transcript:</label>

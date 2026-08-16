@@ -1,5 +1,38 @@
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+export function getCompanyTier(companyObjOrName) {
+  const companyName = typeof companyObjOrName === 'string' 
+    ? companyObjOrName 
+    : companyObjOrName?.name || '';
+  
+  const nameLower = companyName.toLowerCase();
+
+  // Tier 3: FAANG / MAMAA & Top Tier Product
+  if (/google|amazon|netflix|meta|apple|microsoft|uber|atlassian/i.test(nameLower)) {
+    return {
+      tier: 3,
+      label: 'Tier 3 — FAANG / Top-Tier Product',
+      badgeBg: 'bg-purple-100 text-purple-800 border-purple-200',
+      expectations: 'High Expectations: Demands optimal time/space complexity O(N)/O(log N), complete edge-case coverage, and deep architectural trade-off articulation.'
+    };
+  }
+
+  // Tier 2: Product / Mid-Tier Enterprise
+  if (/flipkart|swiggy|paytm|adobe|zomato|razorpay|stripe|salesforce|intuit|oracle/i.test(nameLower)) {
+    return {
+      tier: 2,
+      label: 'Tier 2 — Product / Mid-Tier Enterprise',
+      badgeBg: 'bg-blue-100 text-blue-800 border-blue-200',
+      expectations: 'Moderate Expectations: Demands clean code modularity, near-optimal complexity, and structured communication.'
+    };
+  }
+
+  // Tier 1: Mass Recruiters / IT Services Baseline
+  return {
+    tier: 1,
+    label: 'Tier 1 — Mass Recruiters / IT Services',
+    badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    expectations: 'Baseline Expectations: Focuses on working logic, basic test case pass rates, and fundamental CS concepts.'
+  };
+}
 
 export const INITIAL_COMPANIES = [
   {

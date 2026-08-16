@@ -40,9 +40,8 @@ export default function GamificationWidget({ reportsHistory = [] }) {
 
   // Compute Candidate's actual Readiness Score for Leaderboard ranking
   const latestReportScore = reportsHistory[0]?.readinessScore;
-  const userReadinessScore = latestReportScore ?? (
-    prepContext.sessionResults?.length > 0 ? 88 : 84
-  );
+  const userReadinessScore = typeof latestReportScore === 'number' ? latestReportScore : 0;
+
 
   // Leaderboard data with current candidate dynamically inserted & ranked
   const seedLeaderboard = [
