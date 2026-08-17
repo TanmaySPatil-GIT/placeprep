@@ -13,8 +13,18 @@ export const getBackendUrl = () => {
       import.meta.env.VITE_PUBLIC_BACKEND_URL
     ));
 
-  const url = envUrl ? envUrl.trim().replace(/\/$/, '') : 'http://localhost:5000';
-  return url;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname;
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '[::1]') {
+      return window.location.origin.replace(/\/$/, '');
+    }
+  }
+
+  return 'http://localhost:5000';
 };
 
 export const BACKEND_URL = getBackendUrl();

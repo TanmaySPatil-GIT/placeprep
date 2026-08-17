@@ -3,7 +3,7 @@
  * Communicates with backend Flask API endpoints for resume analysis and question generation.
  * Includes a 120-second timeout for Render free tier cold start tolerance.
  */
-import { getBackendUrl } from '../config/api';
+import { BACKEND_URL, getBackendUrl } from '../config/api';
 
 export async function analyzeResumeApi(file, targetField = 'Software Development', companyName = 'Google', options = {}) {
   if (!file) {
@@ -28,7 +28,7 @@ export async function analyzeResumeApi(file, targetField = 'Software Development
     formData.append('require_target_field', 'true');
   }
 
-  const FLASK_RESUME_URL = `${getBackendUrl()}/api/analyze-resume`;
+  const FLASK_RESUME_URL = `${BACKEND_URL}/api/analyze-resume`;
   const timeoutMs = options.timeoutMs || 120000; // 120 seconds for Render cold starts
 
   const controller = new AbortController();
@@ -63,7 +63,7 @@ export async function analyzeResumeApi(file, targetField = 'Software Development
 }
 
 export async function generateResumeQuestionsApi(extractedProfile, companyName = 'Google', targetField = 'Software Development', options = {}) {
-  const FLASK_QUESTIONS_URL = `${getBackendUrl()}/api/generate-resume-interview-questions`;
+  const FLASK_QUESTIONS_URL = `${BACKEND_URL}/api/generate-resume-interview-questions`;
   const timeoutMs = options.timeoutMs || 60000;
 
   const controller = new AbortController();

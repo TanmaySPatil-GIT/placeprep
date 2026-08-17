@@ -680,14 +680,14 @@ function runWithLocalJS(sourceCode, language, input, expectedOutput) {
   };
 }
 
-import { getBackendUrl } from '../config/api';
+import { BACKEND_URL, getBackendUrl } from '../config/api';
 
 /**
  * Execute single test case by routing through Flask backend (which calls Judge0 CE server-side, bypassing browser CORS)
  */
 async function runWithFlaskBackend(sourceCode, language, input, expectedOutput) {
   const executableCode = buildExecutableCode(sourceCode, language, input);
-  const targetUrl = `${getBackendUrl()}/api/run-code`;
+  const targetUrl = `${BACKEND_URL}/api/run-code`;
 
   console.log(`[CodeExecution] Sending request to Flask backend (${targetUrl})...`);
   
@@ -783,7 +783,7 @@ async function runWithFlaskBackend(sourceCode, language, input, expectedOutput) 
  * Flask Backend (Server-side Judge0) -> Direct Judge0 -> Direct Piston -> Local JS (JS only) -> Infrastructure Error
  */
 export async function executeSingleTestCase(sourceCode, language, input, expectedOutput) {
-  const currentBackendUrl = `${getBackendUrl()}/api/run-code`;
+  const currentBackendUrl = `${BACKEND_URL}/api/run-code`;
   console.log(`[CodeExecution] Start test execution: language="${language}", input="${input}", expected="${expectedOutput}"`);
 
   // Step 1: Flask Backend API (bypasses browser CORS & connects directly to Judge0 CE)
