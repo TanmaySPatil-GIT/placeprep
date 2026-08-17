@@ -41,7 +41,7 @@ export default function ProgressStepper() {
       id: 'resume',
       path: '/resume',
       title: '1. Resume Gate',
-      sub: resumeData ? `ATS ${resumeData.atsScore || 75}%` : 'Screening',
+      sub: resumeData ? `ATS ${resumeData.atsScore ?? 0}%` : 'Screening',
       icon: FileText,
       isCompleted: !!resumeData,
       isSkipped: false

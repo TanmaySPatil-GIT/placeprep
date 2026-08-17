@@ -147,7 +147,7 @@ export default function ResumePage() {
     }
   };
 
-  const atsScore = analysisResults?.atsScore || 82;
+  const atsScore = analysisResults?.atsScore ?? 0;
   const scoreColor = atsScore > 75 ? '#7ba05b' : atsScore >= 50 ? '#d4a574' : '#a8623f';
   const gaugeData = [
     { name: 'Score', value: atsScore, fill: scoreColor },

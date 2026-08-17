@@ -1330,7 +1330,7 @@ export default function FinalReportPage() {
             <div className="p-4 rounded-xl bg-[#123326] border border-[#2a4c3e] space-y-2">
               <div className="flex items-center justify-between font-serif font-bold text-white text-sm">
                 <span>Stage 1: Resume ATS Audit</span>
-                <span className="text-[#e8c088] font-mono">{resumeData.atsScore || 85}% ATS Score</span>
+                <span className="text-[#e8c088] font-mono">{resumeData.atsScore ?? 0}% ATS Score</span>
               </div>
               <div className="text-[11px] text-[#c5d9cb]">
                 <span>Missing Industry Keywords Flagged: </span>

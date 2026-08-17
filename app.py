@@ -90,7 +90,7 @@ def call_gemini(prompt: str):
     """Calls Gemini API trying available models with fallback."""
     if not genai_client:
         return None
-    for model_name in ['gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']:
+    for model_name in ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']:
         try:
             response = genai_client.models.generate_content(
                 model=model_name,
@@ -323,41 +323,61 @@ def analyze_resume():
                 "error": "Could not extract text from this PDF. Please upload a text-based PDF resume rather than a scanned image PDF."
             }), 400
 
-        prompt = f"""You are an experienced technical recruiter and ATS resume auditor evaluating a candidate targeting {target_field} roles at companies like {company_name}.
-Analyze the following candidate's resume text:
+        tier_info = get_company_tier_info(company_name)
 
+        prompt = f"""You are a senior technical recruiter and principal engineering manager conducting a rigorous ATS resume screen for {company_name}.
+The candidate is applying for a {target_field} position.
+
+Candidate's Resume Text:
 --- RESUME TEXT START ---
 {cleaned_resume_text[:4000]}
 --- RESUME TEXT END ---
 
-CRITICAL INSTRUCTIONS:
-1. Evaluate ATS parseability score (0-100), overall impression, specific strengths referencing their content, actionable weaknesses (with specific quotes/examples from their resume and concrete rewrite suggestions), missing industry keywords for {target_field}/{company_name}, and extracted profile details (skills, projects, experience, educationSummary).
-2. You MUST return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
+EVALUATION BAR & STRICT CALIBRATION ({tier_info['tierName']}):
+- Target Company: {company_name} ({tier_info['tierName']})
+- Target Role/Field: {target_field}
+
+CRITICAL SCORING RULES (BE EXTREMELY STRICT AND UNSPARING):
+1. TECHNICAL DEPTH (0-30 pts): Basic static HTML/CSS web pages (e.g. portfolio, birthday card, space page, calculator) without modern frameworks (React, Vue, Node, Flask, FastAPI), databases, complex state, or system logic MUST receive LOW points (5-10 out of 30).
+2. DOMAIN & BRANCH ALIGNMENT (0-25 pts): If the candidate mentions AI, Machine Learning, CS, or Data Science branch/degree but has ZERO ML/AI projects, deep learning models, PyTorch/TensorFlow, or data pipelines, severely deduct points for missing domain-relevant work.
+3. INDUSTRY EXPERIENCE & MEASURABLE IMPACT (0-25 pts): Absence of software internships, open-source contributions, or quantifiable metrics (e.g. latency reduced by X%, 10k users, performance benchmarks) MUST result in minimal points (0-5 out of 25).
+4. FORMATTING & PARSEABILITY (0-20 pts): Clear structure and readable sections.
+
+SCORE INTERPRETATION:
+- 80-100: Exceptional candidate with strong framework/ML project depth, internships, and quantified metrics ready for FAANG/top-product screening.
+- 60-79: Solid candidate with framework depth, but missing top-tier internship or quantified impact.
+- 35-59: Beginner resume with basic/toy projects (e.g. static HTML/CSS), missing framework/ML depth or internships. Unlikely to pass recruiter screen at {company_name}.
+- 0-34: Incomplete, trivial, or severely deficient resume.
+
+CRITICAL INSTRUCTIONS FOR FEEDBACK:
+1. BE BLUNT, HONEST, AND DIRECT. Do NOT soften criticism or use patronizing, sugarcoated encouragement (e.g., avoid "Great effort!" or "You're off to a good start!").
+2. Call out weak or trivial projects plainly (e.g. "Static HTML birthday greeting pages and basic CSS portfolios do not demonstrate technical competency for engineering roles at {company_name}.").
+3. Explicitly state missing domain competencies (e.g., "AIML student resume completely lacks machine learning frameworks, model training, or data pipelines.").
+4. Return ONLY valid raw JSON with NO markdown formatting and NO preamble.
 
 Return this exact JSON structure:
 {{
-  "atsScore": 84,
-  "overallImpression": "2-3 encouraging but honest sentences summarizing resume strength and technical clarity.",
+  "atsScore": 42,
+  "overallImpression": "2-3 blunt, unvarnished sentences evaluating if this candidate would pass recruiter screening at {company_name}.",
   "strengths": [
-    "Specific strength point 1 referencing actual resume content",
-    "Specific strength point 2"
+    "Factual strength (if any exist)"
   ],
   "weaknesses": [
     {{
-      "issue": "Work experience bullets describe duties rather than measurable impact",
-      "example": "Paraphrase or quote weak line from resume",
-      "suggestion": "Quantify with percentages, user counts, or latency reductions",
+      "issue": "Specific weakness title",
+      "example": "Quote or reference weak line or missing item from resume",
+      "suggestion": "Blunt, concrete action required to reach top-company standards",
       "severity": "high"
     }}
   ],
   "missingKeywords": [
-    "Docker", "CI/CD", "System Architecture"
+    "Required framework/tool 1", "Required framework/tool 2"
   ],
   "extractedProfile": {{
-    "skills": ["Skill 1", "Skill 2"],
-    "projects": ["Project Title & short summary"],
-    "experience": ["Company Name - Role (Dates)"],
-    "educationSummary": "B.Tech Computer Science"
+    "skills": ["Extracted skill 1"],
+    "projects": ["Extracted project title"],
+    "experience": ["Extracted experience item"],
+    "educationSummary": "Extracted degree/education summary"
   }}
 }}
 """
@@ -371,8 +391,9 @@ Return this exact JSON structure:
             except Exception as e:
                 print(f"Gemini API Exception in analyze_resume: {e}")
 
-        # Solid heuristic fallback response if Gemini client is unconfigured or fails
+        # Calibrated heuristic fallback response if Gemini client is unconfigured or fails
         lines = [l.strip() for l in cleaned_resume_text.split('\n') if l.strip()]
+        text_lower = cleaned_resume_text.lower()
         extracted_skills = []
         extracted_projects = []
         extracted_experience = []
@@ -388,34 +409,49 @@ Return this exact JSON structure:
                 if len(line) < 150 and line not in extracted_experience:
                     extracted_experience.append(line)
 
+        # Dynamic heuristic ATS score calculation
+        has_frameworks = any(kw in text_lower for kw in ['react', 'vue', 'angular', 'node', 'express', 'flask', 'django', 'fastapi', 'spring', 'pytorch', 'tensorflow', 'keras', 'scikit', 'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'postgres', 'mongodb', 'redis'])
+        has_internship = any(kw in text_lower for kw in ['intern', 'internship', 'software engineer', 'developer intern', 'experience'])
+        has_metrics = any(re.search(r'\d+%', line) or re.search(r'\d+\s*(users|ms|k|m|requests|fps)', line, re.I) for line in lines)
+        is_aiml_branch = any(kw in text_lower for kw in ['aiml', 'ai & ml', 'artificial intelligence', 'machine learning', 'data science'])
+        has_ml_projects = any(kw in text_lower for kw in ['pytorch', 'tensorflow', 'model', 'neural', 'nlp', 'computer vision', 'classifier', 'regression', 'scikit-learn', 'deep learning'])
+
+        calc_score = 35
+        if has_frameworks: calc_score += 20
+        if has_internship: calc_score += 20
+        if has_metrics: calc_score += 15
+        if is_aiml_branch and has_ml_projects: calc_score += 10
+        elif is_aiml_branch and not has_ml_projects: calc_score -= 10
+
+        calc_score = max(20, min(95, calc_score))
+
         return jsonify({
-            "atsScore": 82,
-            "overallImpression": f"Your resume demonstrates clear technical direction for {target_field} roles targeting companies like {company_name}. With stronger quantified metric bullet points and targeted cloud/system keywords, your ATS score will reach tier-1 benchmark level.",
+            "atsScore": calc_score,
+            "overallImpression": f"This resume shows beginner-level technical depth for {target_field} roles targeting {company_name}. The listed projects and technical stack require significant upgrade with full-stack frameworks, production databases, and domain-relevant experience to pass recruiter screening.",
             "strengths": [
-                f"Included relevant technical projects and skills tailored to {target_field}.",
-                "Clean layout structure that parses well across standard ATS optical parsers.",
-                f"Clear academic background and project highlights."
+                "Parseable single-column layout structure.",
+                "Factual list of basic programming fundamentals."
             ],
             "weaknesses": [
                 {
-                    "issue": "Experience bullets focus on daily responsibilities rather than measurable business impact",
-                    "example": lines[min(3, len(lines)-1)] if lines else "Developed software components for web application",
-                    "suggestion": "Quantify outcomes (e.g. 'Improved API response latency by 35%' or 'Scaled platform to 10k monthly active users')",
+                    "issue": "Lack of Advanced Software Frameworks & Production Depth",
+                    "example": lines[min(3, len(lines)-1)] if lines else "Static web pages",
+                    "suggestion": "Replace basic static web projects with full-stack applications featuring authentication, databases, and API integration.",
                     "severity": "high"
                 },
                 {
-                    "issue": "Missing explicit cloud infrastructure and automated CI/CD pipeline keywords",
-                    "example": "Project section lists frameworks but lacks deployment details",
-                    "suggestion": "Add containerization and deployment tools like Docker, AWS, or GitHub Actions",
-                    "severity": "medium"
+                    "issue": "Absence of Industry Experience & Quantifiable Engineering Metrics",
+                    "example": "No software engineering internships or performance metrics listed.",
+                    "suggestion": "Secure technical internships or contribute to open-source projects, quantifying outcomes with latency, traffic, or user metrics.",
+                    "severity": "high"
                 }
             ],
-            "missingKeywords": ["Docker", "CI/CD", "AWS / Cloud", "Microservices", "Unit Testing"],
+            "missingKeywords": ["Data Structures & Algorithms", "Python", "React / Node.js", "SQL / Databases", "System Design", "Docker"],
             "extractedProfile": {
-                "skills": extracted_skills[:6] if extracted_skills else ["JavaScript", "Python", "React", "SQL", "Git"],
-                "projects": extracted_projects[:4] if extracted_projects else ["Full-Stack Web Portal", "Machine Learning Analytics Engine"],
-                "experience": extracted_experience[:3] if extracted_experience else ["Software Engineering Intern"],
-                "educationSummary": "Bachelor of Technology in Computer Science & Engineering"
+                "skills": extracted_skills[:6] if extracted_skills else ["JavaScript", "HTML/CSS", "Git"],
+                "projects": extracted_projects[:4] if extracted_projects else ["Personal Website"],
+                "experience": extracted_experience[:3] if extracted_experience else [],
+                "educationSummary": "Bachelor of Technology"
             }
         })
     except Exception as outer_err:
