@@ -338,7 +338,7 @@ export default function FinalReportPage() {
         dsaOrTechnicalResults: dsaResult,
         systemDesignResults: systemDesignResult,
         interviewResults: sessionResults && sessionResults.length > 0 ? {
-          overallConfidence: Math.round(sessionResults.reduce((acc, r) => acc + (r.score || 80), 0) / sessionResults.length),
+          overallConfidence: Math.round(sessionResults.reduce((acc, r) => acc + (r.score || 0), 0) / sessionResults.length),
           answersCount: sessionResults.length
         } : null,
         hrResults: hrInterviewResult
@@ -653,10 +653,10 @@ export default function FinalReportPage() {
                   <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
                     <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
                       <span>Technical Knowledge</span>
-                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{report?.subScores?.technicalKnowledge?.score || 8.5} / 10</span>
+                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{(report?.subScores?.technicalKnowledge?.score ?? 0)} / 10</span>
                     </div>
                     <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${((report?.subScores?.technicalKnowledge?.score || 8.5) / 10) * 100}%` }}></div>
+                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.technicalKnowledge?.score ?? 0)) / 10) * 100}%` }}></div>
                     </div>
                     <p className="text-[11px] text-darkcharcoal-500 italic">
                       {report?.subScores?.technicalKnowledge?.notes || 'Derived from coding correctness, technical interview, and core CS MCQs.'}
@@ -669,10 +669,10 @@ export default function FinalReportPage() {
                   <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
                     <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
                       <span>Communication</span>
-                      <span className="font-mono text-gold-600 text-sm font-extrabold">{report?.subScores?.communication?.score || 8.2} / 10</span>
+                      <span className="font-mono text-gold-600 text-sm font-extrabold">{(report?.subScores?.communication?.score ?? 0)} / 10</span>
                     </div>
                     <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-gold-500 h-full rounded-full transition-all duration-500" style={{ width: `${((report?.subScores?.communication?.score || 8.2) / 10) * 100}%` }}></div>
+                      <div className="bg-gold-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.communication?.score ?? 0)) / 10) * 100}%` }}></div>
                     </div>
                     <p className="text-[11px] text-darkcharcoal-500 italic">
                       {report?.subScores?.communication?.notes || 'Derived from speech telemetry (WPM, fillers, pauses) and STAR structure.'}
@@ -685,10 +685,10 @@ export default function FinalReportPage() {
                   <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
                     <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
                       <span>Problem Solving</span>
-                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{report?.subScores?.problemSolving?.score || 8.4} / 10</span>
+                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{(report?.subScores?.problemSolving?.score ?? 0)} / 10</span>
                     </div>
                     <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${((report?.subScores?.problemSolving?.score || 8.4) / 10) * 100}%` }}></div>
+                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.problemSolving?.score ?? 0)) / 10) * 100}%` }}></div>
                     </div>
                     <p className="text-[11px] text-darkcharcoal-500 italic">
                       {report?.subScores?.problemSolving?.notes || 'Derived from algorithmic approach, Big-O complexity, and quantitative logic.'}
@@ -1345,7 +1345,7 @@ export default function FinalReportPage() {
           {aptitudeResult && aptitudeResult.questions && (
             <div className="space-y-3">
               <div className="font-serif font-bold text-sm text-white border-b border-[#2a4c3e] pb-1">
-                Stage 2: Aptitude & Quantitative Reasoning Round ({aptitudeResult.percentage || 85}%)
+                Stage 2: Aptitude & Quantitative Reasoning Round ({aptitudeResult.percentage ?? 0}%)
               </div>
               <div className="space-y-2 pl-2">
                 {aptitudeResult.questions.map((q, idx) => (
@@ -1365,7 +1365,7 @@ export default function FinalReportPage() {
           {technicalMcqResult && technicalMcqResult.questions && (
             <div className="space-y-3">
               <div className="font-serif font-bold text-sm text-white border-b border-[#2a4c3e] pb-1">
-                Stage 3: Technical Conceptual MCQs Round ({technicalMcqResult.percentage || 80}%)
+                Stage 3: Technical Conceptual MCQs Round ({technicalMcqResult.percentage ?? 0}%)
               </div>
               <div className="space-y-2 pl-2">
                 {technicalMcqResult.questions.map((q, idx) => (
@@ -1385,7 +1385,7 @@ export default function FinalReportPage() {
           {dsaResult && (
             <div className="space-y-3">
               <div className="font-serif font-bold text-sm text-white border-b border-[#2a4c3e] pb-1">
-                Stage 4: Live Coding & Algorithm Round ({dsaResult.score || 85}%)
+                Stage 4: Live Coding & Algorithm Round ({dsaResult.score ?? 0}%)
               </div>
               
               <div className="p-4 rounded-xl bg-[#123326] border border-[#2a4c3e] space-y-3">
@@ -1407,7 +1407,7 @@ export default function FinalReportPage() {
                       <div>Time Complexity: <strong className="text-[#e8c088]">{dsaResult.aiAnalysis.timeComplexity || 'O(N)'}</strong></div>
                       <div>Space Complexity: <strong className="text-[#7ba05b]">{dsaResult.aiAnalysis.spaceComplexity || 'O(N)'}</strong></div>
                       <div>Correctness: <strong className="text-[#7ba05b]">{dsaResult.aiAnalysis.correctness ? 'Pass' : 'Requires Optimization'}</strong></div>
-                      <div>Code Quality: <strong className="text-[#e8c088]">{dsaResult.aiAnalysis.codeQualityScore || 9} / 10</strong></div>
+                      <div>Code Quality: <strong className="text-[#e8c088]">{dsaResult.aiAnalysis.codeQualityScore || 0} / 10</strong></div>
                     </div>
                     {dsaResult.aiAnalysis.missedEdgeCases && (
                       <div className="text-[10px] text-[#c5d9cb]">
@@ -1453,7 +1453,7 @@ export default function FinalReportPage() {
           {hrInterviewResult && hrInterviewResult.answers && hrInterviewResult.answers.length > 0 && (
             <div className="space-y-3">
               <div className="font-serif font-bold text-sm text-white border-b border-[#2a4c3e] pb-1">
-                Stage 6: HR & Culture Fit Voice Interview Transcript ({hrInterviewResult.score || 85}%)
+                Stage 6: HR & Culture Fit Voice Interview Transcript ({hrInterviewResult.score ?? 0}%)
               </div>
               <div className="space-y-3 pl-2">
                 {hrInterviewResult.answers.map((ans, idx) => (

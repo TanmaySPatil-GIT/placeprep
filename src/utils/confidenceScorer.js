@@ -61,15 +61,12 @@ export function calculateConfidenceScore(answerResult = {}) {
  * Calculate overall average confidence score across all session answers
  */
 export function calculateOverallSessionConfidence(sessionResults = []) {
-  if (!sessionResults || sessionResults.length === 0) {
+  if (!sessionResults || !Array.isArray(sessionResults) || sessionResults.length === 0) {
     return {
-      overallScore: 88,
-      avgFacialScore: 86,
-      questionScores: [
-        { name: 'Q1', score: 85, wpm: 135, fillers: 1, pauses: 0, gazeRatio: 90, facialScore: 85 },
-        { name: 'Q2', score: 89, wpm: 142, fillers: 0, pauses: 0, gazeRatio: 92, facialScore: 88 },
-        { name: 'Q3', score: 92, wpm: 140, fillers: 0, pauses: 0, gazeRatio: 95, facialScore: 90 }
-      ]
+      overallScore: null,
+      avgFacialScore: null,
+      questionScores: [],
+      hasInterviewData: false
     };
   }
 
@@ -99,6 +96,7 @@ export function calculateOverallSessionConfidence(sessionResults = []) {
   return {
     overallScore,
     avgFacialScore,
-    questionScores
+    questionScores,
+    hasInterviewData: true
   };
 }

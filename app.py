@@ -1839,9 +1839,9 @@ def generate_final_report():
     webcam_captured = data.get('webcamCaptured', False) or (interview_results and interview_results.get('facialScore') is not None) or (data.get('facialTelemetry') is not None)
 
     if webcam_captured:
-        facial_val = float(data.get('facialTelemetry', {}).get('facialScore', (interview_results or {}).get('facialScore', 88))) / 10.0
-        gaze_val = float(data.get('facialTelemetry', {}).get('eyeContactRatio', 90)) / 10.0
-        stability_val = float(data.get('facialTelemetry', {}).get('headStabilityRatio', 88)) / 10.0
+        facial_val = float(data.get('facialTelemetry', {}).get('facialScore', (interview_results or {}).get('facialScore', 0))) / 10.0
+        gaze_val = float(data.get('facialTelemetry', {}).get('eyeContactRatio', 0)) / 10.0
+        stability_val = float(data.get('facialTelemetry', {}).get('headStabilityRatio', 0)) / 10.0
 
         sub_scores['confidence'] = {
             'score': round((facial_val * 0.5) + (gaze_val * 0.5), 1),
