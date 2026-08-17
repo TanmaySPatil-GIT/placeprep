@@ -148,7 +148,7 @@ export default function ResumePage() {
   };
 
   const atsScore = analysisResults?.atsScore ?? 0;
-  const scoreColor = atsScore > 75 ? '#7ba05b' : atsScore >= 50 ? '#d4a574' : '#a8623f';
+  const scoreColor = atsScore >= 80 ? '#7ba05b' : atsScore >= 60 ? '#8fa368' : atsScore >= 40 ? '#d4a574' : '#a8623f';
   const gaugeData = [
     { name: 'Score', value: atsScore, fill: scoreColor },
     { name: 'Remaining', value: 100 - atsScore, fill: '#123326' }
@@ -169,7 +169,7 @@ export default function ResumePage() {
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold font-serif text-warmtext-900">Upload Resume for Personalised Evaluation</h1>
           <p className="text-xs text-warmtext-500 max-w-2xl leading-relaxed font-sans">
-            Extract technical skills, compute ATS parseability scores, identify missing industry keywords, and generate custom interview questions for <strong className="text-rust-500">{companyName}</strong>.
+            Extract technical skills, compute overall ATS match scores, identify missing industry keywords, and generate custom interview questions for <strong className="text-rust-500">{companyName}</strong>.
           </p>
         </div>
 
@@ -295,7 +295,7 @@ export default function ResumePage() {
             {/* ATS Score Gauge (5 cols) */}
             <div className="lg:col-span-5 rounded-3xl bg-[#FDF4EC] p-6 border border-warmborder flex flex-col items-center justify-center text-center space-y-4 shadow-warm-sm">
               <div className="text-xs font-bold text-warmtext-900 uppercase tracking-wider font-serif">
-                ATS Audit Parseability Score
+                Overall ATS Match Score
               </div>
 
               {/* Radial Score Gauge */}
@@ -322,13 +322,13 @@ export default function ResumePage() {
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/3 text-center space-y-1">
                   <div className="text-4xl font-bold font-serif text-warmtext-900">{atsScore}/100</div>
                   <div className="text-[11px] font-bold" style={{ color: scoreColor }}>
-                    {atsScore > 75 ? 'Tier-1 High Pass' : atsScore >= 50 ? 'Moderate ATS Score' : 'Needs Formatting Revision'}
+                    {atsScore >= 80 ? 'Tier-1 High Pass' : atsScore >= 60 ? 'Moderate Match' : atsScore >= 40 ? 'Needs Major Revision' : 'High Risk - Critical Gaps'}
                   </div>
                 </div>
               </div>
 
               <div className="text-xs text-warmtext-500 max-w-xs">
-                Evaluated against enterprise recruitment parsers for {targetField} roles.
+                Unified evaluation of formatting, technical depth, and role alignment for {targetField} at {companyName}.
               </div>
             </div>
 

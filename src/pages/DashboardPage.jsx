@@ -344,7 +344,7 @@ export default function DashboardPage() {
             </div>
             <h2 className="text-lg font-bold font-serif text-warmtext-900">Audit Your Resume & Personalize Interview Questions</h2>
             <p className="text-xs text-warmtext-500 max-w-xl">
-              Upload your PDF resume to calculate your ATS Parseability Score, identify missing keywords, and generate custom interview questions based on your actual projects.
+              Upload your PDF resume to calculate your Overall ATS Match Score, identify missing keywords, and generate custom interview questions based on your actual projects.
             </p>
           </div>
         </div>

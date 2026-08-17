@@ -90,7 +90,7 @@ def call_gemini(prompt: str):
     """Calls Gemini API trying available models with fallback."""
     if not genai_client:
         return None
-    for model_name in ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']:
+    for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-exp', 'gemini-flash-latest', 'gemini-pro-latest']:
         try:
             response = genai_client.models.generate_content(
                 model=model_name,

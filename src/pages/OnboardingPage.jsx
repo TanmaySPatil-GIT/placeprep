@@ -476,7 +476,7 @@ export default function OnboardingPage() {
                 <div className="w-16 h-16 rounded-full bg-accent-gold/20 border border-accent-gold text-accent-gold flex items-center justify-center text-xl font-bold font-serif mx-auto">
                   {atsScorePreview}%
                 </div>
-                <h4 className="text-sm font-bold font-serif text-white">ATS Parseability Score Calculated</h4>
+                <h4 className="text-sm font-bold font-serif text-white">Overall ATS Match Score Calculated</h4>
                 <p className="text-xs text-sage-400">Your resume audit will be pre-loaded onto your dashboard!</p>
               </div>
             ) : (
