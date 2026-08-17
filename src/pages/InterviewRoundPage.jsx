@@ -602,6 +602,7 @@ export default function InterviewRoundPage() {
     const payload = {
       selectedCompany: companyName,
       targetField,
+      interviewType: 'technical',
       experienceLevel: experienceLevel || 'Fresher',
       experienceYears: experienceYears || '0-2',
       difficultyLevel: difficultyLevel || 'Medium',
@@ -613,10 +614,10 @@ export default function InterviewRoundPage() {
       recentQuestions: questionsBank.map(q => q.question)
     };
 
-    console.log('[Interview Debug] Step 2 - Payload sent to /api/interview-followup:', payload);
+    console.log('[Interview Debug: Technical] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 25000);
+    const fetchTimeout = setTimeout(() => controller.abort(), 35000); // 35s timeout for cold start tolerance
 
     let backendNextQ = null;
     let isFollowup = false;
@@ -631,9 +632,11 @@ export default function InterviewRoundPage() {
 
       clearTimeout(fetchTimeout);
 
+      console.log(`[Interview Debug: Technical] Step 3 - API response status: ${response.status} ${response.statusText}`);
+
       if (response.ok) {
         const data = await response.json();
-        console.log('[Interview Debug] Step 3 - Gemini response received from backend:', data);
+        console.log('[Interview Debug: Technical] Step 3 - Gemini response resolved (raw payload):', data);
         setAiReasoning(data.reasoning || '');
 
         if (data.action === 'followup' && topicFollowupCount < 2) {
@@ -642,37 +645,48 @@ export default function InterviewRoundPage() {
         } else if (data.questionText) {
           backendNextQ = data.questionText;
         }
+      } else {
+        const errBody = await response.text().catch(() => '');
+        console.error(`[Interview Debug: Technical] Step 3 - API response error HTTP ${response.status}:`, errBody);
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
-      console.warn('[Interview Debug] Follow-up endpoint notice (using fallback):', err.message);
+      if (err.name === 'AbortError') {
+        console.error('[Interview Debug: Technical] Step 3 - API call TIMED OUT after 35s! (Backend server cold start or AI delay)');
+      } else {
+        console.error('[Interview Debug: Technical] Step 3 - Caught API call error:', err.name, err.message, err);
+      }
     } finally {
       setEvaluatingFollowup(false);
     }
 
-    if (isFollowup && backendNextQ) {
-      setTopicFollowupCount(prev => prev + 1);
-      console.log('[Interview Debug] Step 4 - Rendering & speaking ADAPTIVE FOLLOW-UP:', backendNextQ);
+    try {
+      if (isFollowup && backendNextQ) {
+        setTopicFollowupCount(prev => prev + 1);
+        console.log('[Interview Debug: Technical] Step 4 - Triggering state update: ADAPTIVE FOLLOW-UP:', backendNextQ);
 
-      setCurrentSpokenQuestion(backendNextQ);
-      setCurrentBasedOn('Adaptive AI Probing Follow-Up');
+        setCurrentSpokenQuestion(backendNextQ);
+        setCurrentBasedOn('Adaptive AI Probing Follow-Up');
 
-      setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
-      triggerAISpeech(backendNextQ);
-    } else {
-      const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
-      setBankQuestionIdx(nextIdx);
-      setTopicFollowupCount(0);
+        setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
+        triggerAISpeech(backendNextQ);
+      } else {
+        const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
+        setBankQuestionIdx(nextIdx);
+        setTopicFollowupCount(0);
 
-      const nextQObj = questionsBank[nextIdx];
-      const nextQText = backendNextQ || `Moving on to our next topic: ${nextQObj.question}`;
-      console.log(`[Interview Debug] Step 4 - Rendering & speaking NEXT QUESTION (Q${nextIdx + 1}):`, nextQText);
+        const nextQObj = questionsBank[nextIdx];
+        const nextQText = backendNextQ || `Moving on to our next topic: ${nextQObj.question}`;
+        console.log(`[Interview Debug: Technical] Step 4 - Triggering state update: NEXT QUESTION (Q${nextIdx + 1}):`, nextQText);
 
-      setCurrentSpokenQuestion(nextQText);
-      setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
+        setCurrentSpokenQuestion(nextQText);
+        setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
 
-      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-      triggerAISpeech(nextQText);
+        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
+        triggerAISpeech(nextQText);
+      }
+    } catch (progErr) {
+      console.error('[Interview Debug: Technical] Step 4 - Error during progression state update:', progErr);
     }
   };
 

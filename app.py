@@ -86,20 +86,47 @@ def clean_json_response(raw_text: str) -> str:
     cleaned = RE_JSON_FENCE_END.sub('', cleaned)
     return cleaned.strip()
 
+MODEL_FALLBACK_CHAIN = [
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.7-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-8b',
+    'gemini-flash-latest'
+]
+
 def call_gemini(prompt: str):
-    """Calls Gemini API trying available models with fallback."""
+    """Calls Gemini API trying available models with multi-model quota fallback chain."""
     if not genai_client:
+        print("[Gemini Client] Warning: genai_client is not initialized.")
         return None
-    for model_name in ['gemini-2.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-exp', 'gemini-flash-latest', 'gemini-pro-latest']:
+
+    for model_name in MODEL_FALLBACK_CHAIN:
         try:
             response = genai_client.models.generate_content(
                 model=model_name,
                 contents=prompt
             )
             if response and response.text:
+                print(f"[Gemini Client] SUCCESS: Generated content using model '{model_name}'")
                 return response.text
         except Exception as e:
-            print(f"Gemini API Notice for {model_name}: {e}")
+            err_msg = str(e)
+            if '404' in err_msg or 'NOT_FOUND' in err_msg:
+                print(f"[Gemini Client] Notice: Model '{model_name}' not found (404). Rotating to next model...")
+            elif '429' in err_msg or 'RESOURCE_EXHAUSTED' in err_msg:
+                print(f"[Gemini Client] Notice: Model '{model_name}' quota exhausted (429). Rotating to next model...")
+            else:
+                print(f"[Gemini Client] Notice: Model '{model_name}' error: {err_msg[:120]}. Rotating to next model...")
+
+    print("[Gemini Client] WARNING: All models in fallback chain failed or exhausted.")
+    return None
 def get_company_tier_info(company_name: str) -> dict:
     name = (company_name or '').lower()
     if any(k in name for k in ['google', 'amazon', 'netflix', 'meta', 'apple', 'microsoft', 'uber', 'atlassian']):
@@ -1364,24 +1391,31 @@ JSON Structure Required:
         except Exception as e:
             print(f"[Backend Debug] Exception parsing Gemini JSON: {e}")
 
-    # Fallback heuristic logic if Gemini is unavailable
+    # Fallback heuristic logic if Gemini is unavailable or JSON parsing failed
     last_ans = latest_candidate_answer
-    ans_length = len(last_ans.split())
+    ans_words = [w for w in last_ans.split() if len(w) > 3]
+    key_snippet = " ".join(ans_words[:6]) if ans_words else last_ans[:40]
 
-    if ans_length < 25 and topic_followup_count < max_followups:
-        probing_q = f"You mentioned: '{last_ans[:40]}...' Could you elaborate with specific technical trade-offs or measurable results?"
+    print(f"[Backend Debug] Gemini generation unavailable/failed. Engaging dynamic fallback for '{interview_type}' round...")
+
+    if topic_followup_count < max_followups and len(last_ans.split()) > 3:
+        if interview_type == 'hr':
+            probing_q = f"Thank you for sharing that. Building on your point about '{key_snippet}', could you share a specific situation where you demonstrated this in practice using the STAR method?"
+        else:
+            probing_q = f"Thank you. Regarding your point on '{key_snippet}', how would you approach debugging, scaling, or edge-case validation for this setup?"
+        
         fallback_res = {
             "action": "followup",
             "questionText": probing_q,
-            "reasoning": f"Candidate answer was brief ({ans_length} words); asking specific follow-up on '{last_ans[:30]}'."
+            "reasoning": f"Fallback: Gemini API unavailable; asking context-aware probing follow-up on '{key_snippet}'."
         }
         print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
         return jsonify(fallback_res)
     else:
         fallback_res = {
             "action": "next_question",
-            "questionText": f"Thank you for sharing those details! Let's move on to our next topic: {next_planned_question}",
-            "reasoning": "Candidate provided response or reached topic follow-up limit."
+            "questionText": f"Thank you for those details! Let's move on to our next topic: {next_planned_question}",
+            "reasoning": "Fallback: Reached topic follow-up limit or brief answer; advancing to next question."
         }
         print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
         return jsonify(fallback_res)
