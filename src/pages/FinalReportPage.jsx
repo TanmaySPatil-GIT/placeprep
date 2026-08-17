@@ -41,6 +41,14 @@ import {
   UserCheck,
   ShieldCheck,
   TrendingUp,
+  HeartHandshake,
+  GitCompare,
+  BarChart2,
+  Info,
+  MessageSquareCode,
+  Users,
+  Copy,
+  Mic,
   Award as RibbonIcon
 } from 'lucide-react';
 

@@ -26,7 +26,8 @@ import {
   ShieldAlert,
   Brain,
   Users,
-  Award
+  Award,
+  Loader2
 } from 'lucide-react';
 
 import { shuffleArray } from '../utils/shuffle';
