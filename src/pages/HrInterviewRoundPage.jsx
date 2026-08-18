@@ -291,14 +291,50 @@ export default function HrInterviewRoundPage() {
     });
   };
 
-  const handleStartSession = () => {
+  const handleStartSession = async () => {
     setHasStartedSession(true);
-    const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
-    const initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. I'll be assessing your interpersonal skills, leadership alignment, and career aspirations. Let's begin: ${firstQ.question}`;
+    setQuestionIdx(0);
+    setConversationHistory([]);
+    setAiState('thinking');
+
+    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
+    let initialGreeting = '';
+
+    try {
+      const response = await fetch(FLASK_FOLLOWUP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedCompany: companyName,
+          targetField,
+          interviewType: 'hr',
+          difficultyLevel: difficultyLevel || 'Medium',
+          selectedLanguage: selectedLanguage?.name || 'English',
+          interviewerPersona: interviewerPersona || 'Friendly',
+          isOpening: true
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.questionText) {
+          initialGreeting = data.questionText;
+        }
+      }
+    } catch (e) {
+      console.warn('HR Opening question fetch notice:', e);
+    }
+
+    if (!initialGreeting) {
+      const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
+      initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
+    }
     
     setCurrentSpokenQuestion(initialGreeting);
     setConversationHistory([{ role: 'interviewer', text: initialGreeting }]);
-    triggerAISpeech(initialGreeting);
+
+    setTimeout(() => {
+      triggerAISpeech(initialGreeting);
+    }, 1000);
   };
 
   const handleStartAnswer = () => {
@@ -320,6 +356,8 @@ export default function HrInterviewRoundPage() {
 
   const handleStopAnswer = async () => {
     setIsAnswering(false);
+    const stopTimestamp = Date.now();
+
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (e) {}
@@ -363,7 +401,7 @@ export default function HrInterviewRoundPage() {
     if (typeof addAnswerResult === 'function') {
       addAnswerResult({
         questionId: `hr-q-${questionIdx}`,
-        questionText: currentSpokenQuestion || questionsBank[questionIdx]?.question,
+        questionText: currentSpokenQuestion,
         transcript: userTranscript,
         durationSeconds: answerDuration,
         metrics,
@@ -375,8 +413,6 @@ export default function HrInterviewRoundPage() {
     }
 
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    const nextBankQ = questionsBank[questionIdx + 1] || questionsBank[0];
-
     const payload = {
       selectedCompany: companyName,
       targetField,
@@ -385,18 +421,16 @@ export default function HrInterviewRoundPage() {
       selectedLanguage: selectedLanguage?.name || 'English',
       interviewerPersona: interviewerPersona || 'Friendly',
       conversationHistory: updatedHistory,
-      topicFollowupCount,
-      nextPlannedQuestion: nextBankQ.question,
-      recentQuestions: questionsBank.map(q => q.question)
+      topicFollowupCount
     };
 
     console.log('[Interview Debug: HR] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 35000); // 35s timeout for cold start tolerance
+    const fetchTimeout = setTimeout(() => controller.abort(), 35000);
 
     let backendNextQ = null;
-    let isFollowup = false;
+    let isNewTopic = false;
 
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
@@ -408,52 +442,39 @@ export default function HrInterviewRoundPage() {
 
       clearTimeout(fetchTimeout);
 
-      console.log(`[Interview Debug: HR] Step 3 - API response status: ${response.status} ${response.statusText}`);
-
       if (response.ok) {
         const data = await response.json();
-        console.log('[Interview Debug: HR] Step 3 - Gemini response resolved (raw payload):', data);
-        if (data.action === 'followup' && topicFollowupCount < 2) {
-          isFollowup = true;
-          backendNextQ = data.questionText;
-        } else if (data.questionText) {
-          backendNextQ = data.questionText;
-        }
-      } else {
-        const errBody = await response.text().catch(() => '');
-        console.error(`[Interview Debug: HR] Step 3 - API response error HTTP ${response.status}:`, errBody);
+        console.log('[Interview Debug: HR] Step 3 - Gemini response resolved:', data);
+        backendNextQ = data.interviewerResponse || data.questionText;
+        isNewTopic = data.moveToNewTopic || data.action === 'next_question';
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
-      if (err.name === 'AbortError') {
-        console.error('[Interview Debug: HR] Step 3 - API call TIMED OUT after 35s! (Backend server cold start or AI delay)');
-      } else {
-        console.error('[Interview Debug: HR] Step 3 - Caught API call error:', err.name, err.message, err);
-      }
+      console.error('[Interview Debug: HR] Step 3 - Caught API call error:', err);
     }
 
-    // Progression logic & state updates
-    try {
-      if (isFollowup && backendNextQ) {
-        setTopicFollowupCount(prev => prev + 1);
-        console.log(`[Interview Debug: HR] Step 4 - Triggering state update: ADAPTIVE FOLLOW-UP for Q${questionIdx + 1}:`, backendNextQ);
-        setCurrentSpokenQuestion(backendNextQ);
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
-        triggerAISpeech(backendNextQ);
-      } else if (questionIdx < questionsBank.length - 1) {
+    // Enforce 1.8s interviewer reflection pause in 'thinking' state
+    const elapsedMs = Date.now() - stopTimestamp;
+    const MIN_PAUSE_MS = 1800;
+    const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
+
+    setTimeout(() => {
+      if (questionIdx < 7) {
         const nextIdx = questionIdx + 1;
         setQuestionIdx(nextIdx);
-        setTopicFollowupCount(0);
-        const nextQObj = questionsBank[nextIdx];
-        const nextText = backendNextQ || `Thank you for sharing that. Let's move on to our next HR topic: ${nextQObj.question}`;
+        if (isNewTopic) {
+          setTopicFollowupCount(0);
+        } else {
+          setTopicFollowupCount(prev => prev + 1);
+        }
+
+        const nextText = backendNextQ || "Thank you for sharing that. Building on leadership alignment, how do you handle disagreements within a project team?";
         
-        console.log(`[Interview Debug: HR] Step 4 - Triggering state update: Advancing from Q${questionIdx + 1} to Q${nextIdx + 1} of ${questionsBank.length}:`, nextText);
         setCurrentSpokenQuestion(nextText);
         setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
         triggerAISpeech(nextText);
       } else {
         const finalText = `Thank you! That completes Stage 6 — HR & Culture Fit Interview for ${companyName}. I have recorded your responses for the final evaluation.`;
-        console.log(`[Interview Debug: HR] Step 4 - Triggering state update: Completed all ${questionsBank.length} questions! Showing final scorecard.`);
         setCurrentSpokenQuestion(finalText);
         triggerAISpeech(finalText);
 
@@ -464,23 +485,22 @@ export default function HrInterviewRoundPage() {
           score: finalCommunicationScore,
           clarityScore: metrics.compositeScore,
           starAdherenceScore: starScore,
-          answersCount: questionsBank.length,
+          answersCount: questionIdx + 1,
           isPassed: true,
           summary: `Strong candidate alignment with ${companyName} culture and STAR-structured communication.`,
           timestamp: new Date().toISOString()
         };
 
         setHrResult(finalResult);
-        setHrInterviewResult(finalResult);
+        if (typeof setHrInterviewResult === 'function') {
+          setHrInterviewResult(finalResult);
+        }
         setIsFinished(true);
       }
-    } catch (progErr) {
-      console.error('[Interview Debug: HR] Step 4 - Error in progression state update:', progErr);
-    } finally {
       // Ensure aiState transitions out of 'thinking' so UI never gets stuck in infinite loading state
       setAiState('idle');
       console.log('[Interview Debug: HR] State update complete: aiState reset to idle');
-    }
+    }, remainingPauseMs);
   };
 
 

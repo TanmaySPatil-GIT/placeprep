@@ -1232,7 +1232,6 @@ Return this exact JSON structure:
 def interview_followup():
     data = request.get_json() or {}
     company_name = data.get('selectedCompany', 'Google')
-    tier_info = get_company_tier_info(company_name)
     target_field = data.get('targetField', 'Software Development')
 
     interview_type = data.get('interviewType', 'technical')  # 'technical' | 'hr'
@@ -1240,145 +1239,103 @@ def interview_followup():
     experience_years = data.get('experienceYears', '0-2')
     difficulty_level = data.get('difficultyLevel', 'Medium')
     selected_language = data.get('selectedLanguage', 'English')
-    interviewer_persona = data.get('interviewerPersona', 'Friendly')  # 'Strict' | 'Friendly' | 'Rapid-fire'
     conversation_history = data.get('conversationHistory', [])
-    topic_followup_count = data.get('topicFollowupCount', 0)
-    next_planned_question = data.get('nextPlannedQuestion', 'Tell me about yourself.')
-    recent_questions = data.get('recentQuestions', [])
-
-    recent_str = ", ".join([f'"{q}"' for q in recent_questions[-4:]]) if recent_questions else "None"
+    is_opening = data.get('isOpening', False) or len(conversation_history) == 0
 
     lang_instruction = (
-        f"Generate questionText in {selected_language}. IMPORTANT CODE-SWITCHING RULE: Keep all technical terms (e.g. 'Binary Search', 'Time Complexity', 'Database Indexing', 'STAR method') in English even when speaking in Hindi or Marathi, matching natural Indian technical conversations."
+        f"Generate interviewerResponse in {selected_language}. IMPORTANT CODE-SWITCHING RULE: Keep all technical terms (e.g. 'Binary Search', 'Time Complexity', 'Database Indexing', 'STAR method') in English even when speaking in Hindi or Marathi, matching natural Indian technical conversations."
         if selected_language in ['Hindi', 'Marathi']
-        else "Generate questionText in English."
+        else "Generate interviewerResponse in English."
     )
 
-    # Persona-based tone modifier — pure tone layer, does NOT change question content
-    PERSONA_TONE_MODIFIERS = {
-        'Strict': (
-            "PERSONA TONE — STRICT: You are a no-nonsense interviewer. "
-            "Omit all encouragement phrases ('Good answer!', 'Great!', 'That's interesting'). "
-            "Follow-ups must be direct and terse — one sentence maximum. "
-            "If the candidate was vague, call it out plainly ('That's too vague — be specific.'). "
-            "Never soften transitions. Move to the next question briskly with a single-line pivot."
-        ),
-        'Friendly': (
-            "PERSONA TONE — FRIENDLY: You are a warm, encouraging interviewer. "
-            "Start responses with a brief acknowledgment ('Good point!', 'Thanks for sharing that.'). "
-            "Use patient, open-ended follow-ups. "
-            "Soften any critique with constructive framing. "
-            "Make the candidate feel at ease throughout the conversation."
-        ),
-        'Rapid-fire': (
-            "PERSONA TONE — RAPID-FIRE: You are a high-velocity interviewer covering maximum ground. "
-            "Keep ALL questions to 1-2 sentences maximum — no elaboration or context-setting. "
-            "Skip pleasantries and transitions entirely. "
-            "Prefer 'next_question' over 'followup' unless the candidate's answer was factually wrong. "
-            "Pack in as many distinct topics as possible."
-        )
-    }
-    persona_tone_modifier = PERSONA_TONE_MODIFIERS.get(interviewer_persona, PERSONA_TONE_MODIFIERS['Friendly'])
+    # Opening Question Turn Generation
+    if is_opening:
+        opening_prompt = f"""You are an experienced human interviewer conducting a live {interview_type.upper()} interview for {company_name} for the role of {target_field} ({experience_level} level, {difficulty_level} difficulty).
 
-    max_followups = 3 if difficulty_level == 'Hard' else 1 if difficulty_level == 'Easy' else 2
-    # Rapid-fire persona reduces max follow-ups to 1 regardless of difficulty
-    if interviewer_persona == 'Rapid-fire':
-        max_followups = 1
+Generate a warm, natural, spoken opening turn to launch this live interview.
+Include a brief welcoming sentence introducing yourself and the round, followed immediately by your very first question tailored specifically to a candidate applying for {target_field} at {company_name}.
 
-    if interview_type == 'hr':
-        role_description = f"Senior HR Lead and Talent Partner at {company_name} conducting Stage 6 HR & Culture Fit interview."
-        depth_instruction = "Evaluate communication clarity, structured STAR storytelling (Situation, Task, Action, Result), self-awareness, handling team conflict, and alignment with company core values."
-        style_instruction = "Be warm, encouraging, yet structured. Focus on candidate's specific individual actions and measurable outcomes."
-    else:
-        role_description = f"Senior Technical Interviewer at {company_name} conducting technical interview for a {target_field} position."
-        depth_instruction = (
-            "Ask deeply technical questions about high scale, concurrency, microservice failures, production outage response, and trade-offs under load."
-            if experience_level == 'Experienced'
-            else "Focus on core CS fundamentals, OOP principles, DBMS indexing, OS concepts, clean coding, and academic project logic."
-        )
-        style_instruction = (
-            "Be very sharp, rigorous, and probing. Challenge assumptions and push for edge cases."
-            if difficulty_level == 'Hard'
-            else "Be supportive, gentle, encouraging, and clear."
-            if difficulty_level == 'Easy'
-            else "Maintain standard professional interview rigor."
-        )
+Return ONLY valid raw JSON:
+{{
+  "interviewerResponse": "Natural spoken opening greeting + first question",
+  "moveToNewTopic": true
+}}
+"""
+        print("\n=================== [BACKEND DEBUG: OPENING TURN GENERATION] ===================")
+        raw_opening = call_gemini(opening_prompt)
+        if raw_opening:
+            try:
+                parsed = json.loads(clean_json_response(raw_opening))
+                text = parsed.get('interviewerResponse') or parsed.get('questionText') or ''
+                return jsonify({
+                    "interviewerResponse": text,
+                    "questionText": text,
+                    "moveToNewTopic": True,
+                    "action": "next_question"
+                })
+            except Exception as e:
+                print(f"[Backend Debug] Error parsing opening response: {e}")
 
-    # Extract latest candidate answer
+        default_q = "Tell me about yourself and a technical project you are proud of." if interview_type == 'technical' else "Tell me about yourself and why you're interested in joining our team."
+        fallback_open = f"Hi! Welcome to your {company_name} mock interview for the {target_field} track. Let me get us started: {default_q}"
+        return jsonify({
+            "interviewerResponse": fallback_open,
+            "questionText": fallback_open,
+            "moveToNewTopic": True,
+            "action": "next_question"
+        })
+
+    # Extract latest candidate answer & calculate remaining exchanges
     latest_candidate_answer = "No candidate response recorded yet."
-    for turn in reversed(conversation_history):
-        if turn.get('role') in ['candidate', 'user']:
-            latest_candidate_answer = turn.get('text', '').strip()
-            break
+    candidate_turns = [turn for turn in conversation_history if turn.get('role') in ['candidate', 'user']]
+    if candidate_turns:
+        latest_candidate_answer = candidate_turns[-1].get('text', '').strip()
+
+    total_turns_used = len(candidate_turns)
+    max_exchanges = 10
+    remaining_exchanges = max(1, max_exchanges - total_turns_used)
 
     print("\n=================== [BACKEND DEBUG: /api/interview-followup] ===================")
-    print(f"[Backend Debug] Company: {company_name} | Field: {target_field} | Type: {interview_type}")
-    print(f"[Backend Debug] Persona: {interviewer_persona} | Language: {selected_language} | Diff: {difficulty_level}")
-    print(f"[Backend Debug] Conversation History Turns: {len(conversation_history)}")
+    print(f"[Backend Debug] Company: {company_name} | Field: {target_field} | Type: {interview_type} | Turns Used: {total_turns_used}/{max_exchanges}")
     print(f"[Backend Debug] LATEST CANDIDATE ANSWER: \"{latest_candidate_answer}\"")
     print("================================================================================\n")
 
     history_formatted = []
     for idx, turn in enumerate(conversation_history):
-        role_label = "AI Interviewer" if turn.get('role') in ['interviewer', 'assistant'] else "Candidate"
+        role_label = f"Interviewer ({company_name})" if turn.get('role') in ['interviewer', 'assistant'] else "Candidate"
         history_formatted.append(f"Turn {idx+1} ({role_label}): {turn.get('text', '')}")
-    
-    history_block = "\n".join(history_formatted) if history_formatted else "Interview session starting."
 
-    prompt = f"""You are {role_description}
+    history_block = "\n".join(history_formatted) if history_formatted else "Interview session opening."
 
-{tier_info['strictnessPrompt']}
+    prompt = f"""You are an experienced human interviewer conducting a live {interview_type.upper()} interview for {company_name} for the role of {target_field} ({experience_level} level, {difficulty_level} difficulty). You are not a quiz bot reading questions off a list — you are a real person having a conversation, genuinely listening to what the candidate says, and reacting the way a sharp, experienced interviewer actually would.
 
-CANDIDATE PROFILE:
-- Target Field: {target_field}
-- Experience Level: {experience_level} ({experience_years} years)
-- Interview Type: {interview_type.upper()}
-- Difficulty: {difficulty_level}
-- Spoken Language: {selected_language}
+Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said and let that genuinely shape your response:
 
-EVALUATION FOCUS: {depth_instruction}
-INTERVIEWER STANCE & STYLE: {style_instruction}
-{persona_tone_modifier}
+- If they gave a real answer, don't just praise it and move to a new topic — dig into it a little, the way a curious interviewer naturally does. Ask them why they made a choice, what they'd do differently, poke at an assumption, or ask for a concrete example. Not every single time (that would be exhausting), but often enough that it feels like a real back-and-forth, not a checklist.
+- If they said they don't know something, don't just say 'no worries' and jump to something unrelated — a real interviewer tries to meet them halfway first, simplifies the question, gives a small hint, or asks them to reason it out loud, before deciding to move on.
+- If they gave a vague or surface-level answer, push for specifics the way a real interviewer does — 'can you walk me through that in more detail' or 'what exactly did you mean by that'.
+- If they said something that doesn't actually address what you asked, don't pretend it did — point that out naturally and either rephrase your question or ask them to actually address it.
+- Match your reactions to what was actually said — never respond with praise or enthusiasm to a weak or non-answer, and never respond flatly to a genuinely strong one. Your tone should track the quality of what you just heard, like a real person's would.
+
+You decide, turn by turn, based on the actual content of what the candidate just said, whether to: dig deeper into their last answer, simplify/rephrase because they're struggling, gently challenge something they claimed, or move to a new question because this one has been sufficiently explored. Don't follow a fixed pattern — vary it the way a real interview naturally varies, and let the candidate's actual answers be what drives your decisions, not a script.
+
 LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
+
+You have {remaining_exchanges} remaining exchanges available in this interview before it needs to wrap up — pace yourself accordingly, but never sacrifice a genuine follow-up just because you're mid-list. Use your judgment like a real interviewer would.
 
 FULL CONVERSATION HISTORY SO FAR:
 {history_block}
 
-LATEST CANDIDATE ANSWER TO EVALUATE:
-"{latest_candidate_answer}"
+Return ONLY valid raw JSON with NO markdown code blocks, NO ```json preamble.
 
-CURRENT TOPIC FOLLOW-UP COUNT: {topic_followup_count} / {max_followups} max limit.
-NEXT PLANNED QUESTION FROM QUESTION BANK: "{next_planned_question}"
-
-CRITICAL CONVERSATIONAL INTERVIEWER INSTRUCTIONS:
-1. STEP 1 - ANALYZE THE CANDIDATE'S LATEST ANSWER:
-   - Carefully inspect "{latest_candidate_answer}". Identify specific technical terms, claims, algorithms, tools, numbers, or statements made by the candidate.
-   - Evaluate technical accuracy, depth, and missing edge cases against {company_name} ({tier_info['tierName']}) hiring standards.
-
-2. STEP 2 - DETERMINE INTERVIEWER ACTION:
-   - OPTION A (CHALLENGE / CLARIFY): If the answer was partially incorrect, vague, or missing crucial trade-offs (e.g. candidate claimed O(1) without mentioning hash collisions, or claimed BST lookup is always O(log N) without checking balance):
-     Set action = "followup" (if topicFollowupCount < {max_followups}). Formulate a direct, sharp cross-question pointing out the exact phrase/claim and asking them to clarify or fix the logic.
-   - OPTION B (DEEP PROBE): If the answer was correct but high-level (e.g. candidate mentioned "used Redis cache" or "used binary search"):
-     Set action = "followup" (if topicFollowupCount < {max_followups}). Formulate a follow-up probing deeper into internal mechanics, memory/concurrency overhead, or failure modes.
-   - OPTION C (TRANSITION): If candidate's answer was complete and accurate, OR if topicFollowupCount >= {max_followups}:
-     Set action = "next_question". Formulate a natural 1-sentence conversational transition referencing their exact answer before smoothly introducing the next planned topic: "{next_planned_question}".
-
-3. MANDATORY CITATION RULE:
-   - Your generated questionText MUST explicitly quote or cite at least one specific phrase or concept directly from the candidate's answer: "{latest_candidate_answer}".
-   - Example quote patterns: "You mentioned that...", "Regarding your point on...", "You noted that [concept]...".
-
-4. Return ONLY valid raw JSON with NO markdown code blocks, NO ```json preamble.
-
-JSON Structure Required:
+JSON Output Required:
 {{
-  "action": "followup" or "next_question",
-  "questionText": "Conversational follow-up or transition question directly quoting/referencing the candidate's actual answer",
-  "reasoning": "Brief analysis of candidate's answer correctness/gaps explaining why this question was chosen."
+  "interviewerResponse": "Full natural spoken turn — reaction + next question/follow-up/clarification/simplification, combined naturally as one thing a real interviewer would say.",
+  "moveToNewTopic": true or false
 }}
 """
 
-
-    print(f"[Backend Debug] Sending prompt to Gemini...")
+    print(f"[Backend Debug] Sending human interviewer persona prompt to Gemini...")
     raw_text = call_gemini(prompt)
     print(f"[Backend Debug] Gemini Raw Response Output:\n{raw_text}\n")
 
@@ -1386,39 +1343,50 @@ JSON Structure Required:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
-            print(f"[Backend Debug] Parsed JSON Response -> Action: '{parsed_json.get('action')}', Question: '{parsed_json.get('questionText')}'")
-            return jsonify(parsed_json)
+            resp_text = parsed_json.get('interviewerResponse') or parsed_json.get('questionText') or ''
+            move_new = bool(parsed_json.get('moveToNewTopic', False))
+
+            print(f"[Backend Debug] Parsed Response -> MoveToNewTopic: {move_new}, Response: '{resp_text}'")
+            return jsonify({
+                "interviewerResponse": resp_text,
+                "questionText": resp_text,
+                "moveToNewTopic": move_new,
+                "action": "next_question" if move_new else "followup"
+            })
         except Exception as e:
             print(f"[Backend Debug] Exception parsing Gemini JSON: {e}")
 
-    # Fallback heuristic logic if Gemini is unavailable or JSON parsing failed
-    last_ans = latest_candidate_answer
-    ans_words = [w for w in last_ans.split() if len(w) > 3]
-    key_snippet = " ".join(ans_words[:6]) if ans_words else last_ans[:40]
+    # Fallback heuristic logic ONLY if Gemini API call fails or times out
+    last_ans = latest_candidate_answer.strip()
+    last_ans_lower = last_ans.lower()
 
     print(f"[Backend Debug] Gemini generation unavailable/failed. Engaging dynamic fallback for '{interview_type}' round...")
 
-    if topic_followup_count < max_followups and len(last_ans.split()) > 3:
-        if interview_type == 'hr':
-            probing_q = f"Thank you for sharing that. Building on your point about '{key_snippet}', could you share a specific situation where you demonstrated this in practice using the STAR method?"
-        else:
-            probing_q = f"Thank you. Regarding your point on '{key_snippet}', how would you approach debugging, scaling, or edge-case validation for this setup?"
-        
-        fallback_res = {
-            "action": "followup",
-            "questionText": probing_q,
-            "reasoning": f"Fallback: Gemini API unavailable; asking context-aware probing follow-up on '{key_snippet}'."
-        }
-        print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
-        return jsonify(fallback_res)
-    else:
-        fallback_res = {
-            "action": "next_question",
-            "questionText": f"Thank you for those details! Let's move on to our next topic: {next_planned_question}",
-            "reasoning": "Fallback: Reached topic follow-up limit or brief answer; advancing to next question."
-        }
-        print(f"[Backend Debug] Returning Fallback Response: {fallback_res}")
-        return jsonify(fallback_res)
+    if not last_ans or last_ans == "No candidate response recorded yet.":
+        fallback_text = "I didn't catch your response there — could you check your microphone and give that question a try?"
+        return jsonify({
+            "interviewerResponse": fallback_text,
+            "questionText": fallback_text,
+            "moveToNewTopic": False,
+            "action": "clarify"
+        })
+
+    if any(phrase in last_ans_lower for phrase in ["don't know", "dont know", "not sure", "no idea", "idk"]):
+        fallback_text = "No worries — in simpler terms, do you know the core concept behind how this works, or how you might approach it generally?"
+        return jsonify({
+            "interviewerResponse": fallback_text,
+            "questionText": fallback_text,
+            "moveToNewTopic": False,
+            "action": "simplifyAndRetry"
+        })
+
+    fallback_text = "Got it — thanks for sharing that. Building on your answer, how would you approach scaling or handling edge cases with that setup?"
+    return jsonify({
+        "interviewerResponse": fallback_text,
+        "questionText": fallback_text,
+        "moveToNewTopic": False,
+        "action": "followup"
+    })
 
 
 @app.route('/api/negotiation-response', methods=['POST'])

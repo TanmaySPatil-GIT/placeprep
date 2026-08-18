@@ -93,6 +93,7 @@ export default function InterviewRoundPage() {
   // Conversational AI State
   const [totalExchanges, setTotalExchanges] = useState(0);
   const [topicFollowupCount, setTopicFollowupCount] = useState(0);
+  const [offTopicRetryCount, setOffTopicRetryCount] = useState(0);
   const [conversationHistory, setConversationHistory] = useState([]);
   const [currentSpokenQuestion, setCurrentSpokenQuestion] = useState('');
   const [currentBasedOn, setCurrentBasedOn] = useState('');
@@ -477,23 +478,54 @@ export default function InterviewRoundPage() {
   }, [isAnswering]);
 
   // Start Conversational Interview Session (Opening Greeting & Question)
-  const handleStartInterviewSession = () => {
+  const handleStartInterviewSession = async () => {
     setHasStartedSession(true);
     setTotalExchanges(0);
     setConversationHistory([]);
+    setAiState('thinking');
 
-    const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
-    const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
-    const openingGreeting = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
+    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
+    let openingText = '';
 
-    setCurrentSpokenQuestion(openingGreeting);
-    setCurrentBasedOn(firstQ.basedOn || firstQ.category || `${companyName} Technical Assessment`);
-    
-    setConversationHistory([
-      { role: 'interviewer', text: openingGreeting }
-    ]);
+    try {
+      const response = await fetch(FLASK_FOLLOWUP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedCompany: companyName,
+          targetField,
+          interviewType: 'technical',
+          experienceLevel: experienceLevel || 'Fresher',
+          experienceYears: experienceYears || '0-2',
+          difficultyLevel: difficultyLevel || 'Medium',
+          selectedLanguage: selectedLanguage?.name || 'English',
+          interviewerPersona: interviewerPersona || 'Friendly',
+          isOpening: true
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.questionText) {
+          openingText = data.questionText;
+        }
+      }
+    } catch (e) {
+      console.warn('Opening question fetch notice:', e);
+    }
 
-    triggerAISpeech(openingGreeting);
+    if (!openingText) {
+      const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
+      const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
+      openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
+    }
+
+    setCurrentSpokenQuestion(openingText);
+    setCurrentBasedOn(`${companyName} Technical Assessment`);
+    setConversationHistory([{ role: 'interviewer', text: openingText }]);
+
+    setTimeout(() => {
+      triggerAISpeech(openingText);
+    }, 1000);
   };
 
   // Restart Interview Session (Triggers fresh shuffle & recent question exclusion)
@@ -502,6 +534,7 @@ export default function InterviewRoundPage() {
     setHasStartedSession(false);
     setTotalExchanges(0);
     setTopicFollowupCount(0);
+    setOffTopicRetryCount(0);
     setConversationHistory([]);
     setSavedAnswerMetrics(null);
     setLiveTranscript('');
@@ -529,6 +562,7 @@ export default function InterviewRoundPage() {
   // Candidate Stops Answer & Triggers AI Adaptive Follow-Up Engine
   const handleStopAnswer = async () => {
     setIsAnswering(false);
+    const stopTimestamp = Date.now();
 
     if (recognitionRef.current) {
       try {
@@ -555,11 +589,9 @@ export default function InterviewRoundPage() {
     const gazeRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.gazeCentered).length / recentLogs.length) * 100) : 92;
     const faceRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.faceDetected).length / recentLogs.length) * 100) : 95;
 
-    const activeQ = questionsBank[bankQuestionIdx] || INITIAL_INTERVIEW_QUESTIONS[0];
-
     const answerRecord = {
       questionId: `q-${totalExchanges}`,
-      questionText: currentSpokenQuestion || activeQ.question,
+      questionText: currentSpokenQuestion,
       transcript: userTranscript,
       durationSeconds: answerDuration,
       longPauseCount,
@@ -581,24 +613,24 @@ export default function InterviewRoundPage() {
     const newTotalExchanges = totalExchanges + 1;
     setTotalExchanges(newTotalExchanges);
 
-    // Check if max exchanges reached (8 exchanges)
-    if (newTotalExchanges >= 8) {
+    // Check if max total exchanges reached (10 exchanges round limit)
+    if (newTotalExchanges >= 10) {
       const closingMsg = `That wraps up our mock interview for ${companyName}! Thanks for your time — let's review your diagnostic report now.`;
       setCurrentSpokenQuestion(closingMsg);
       setEvaluatingFollowup(false);
-      triggerAISpeech(closingMsg);
 
       setTimeout(() => {
-        setRoundIndex(2);
-        navigate('/results');
-      }, 4000);
+        triggerAISpeech(closingMsg);
+        setTimeout(() => {
+          setRoundIndex(2);
+          navigate('/results');
+        }, 4000);
+      }, 1800);
       return;
     }
 
     // 3. Call Flask Adaptive Follow-up Endpoint
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    const nextBankQ = questionsBank[bankQuestionIdx + 1] || questionsBank[0];
-
     const payload = {
       selectedCompany: companyName,
       targetField,
@@ -609,18 +641,16 @@ export default function InterviewRoundPage() {
       selectedLanguage: selectedLanguage?.name || 'English',
       interviewerPersona: interviewerPersona || 'Friendly',
       conversationHistory: updatedHistory,
-      topicFollowupCount,
-      nextPlannedQuestion: nextBankQ.question,
-      recentQuestions: questionsBank.map(q => q.question)
+      topicFollowupCount
     };
 
     console.log('[Interview Debug: Technical] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 35000); // 35s timeout for cold start tolerance
+    const fetchTimeout = setTimeout(() => controller.abort(), 35000);
 
     let backendNextQ = null;
-    let isFollowup = false;
+    let isNewTopic = false;
 
     try {
       const response = await fetch(FLASK_FOLLOWUP_URL, {
@@ -636,58 +666,40 @@ export default function InterviewRoundPage() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('[Interview Debug: Technical] Step 3 - Gemini response resolved (raw payload):', data);
-        setAiReasoning(data.reasoning || '');
-
-        if (data.action === 'followup' && topicFollowupCount < 2) {
-          isFollowup = true;
-          backendNextQ = data.questionText;
-        } else if (data.questionText) {
-          backendNextQ = data.questionText;
-        }
+        console.log('[Interview Debug: Technical] Step 3 - Gemini response resolved:', data);
+        backendNextQ = data.interviewerResponse || data.questionText;
+        isNewTopic = data.moveToNewTopic || data.action === 'next_question';
       } else {
         const errBody = await response.text().catch(() => '');
         console.error(`[Interview Debug: Technical] Step 3 - API response error HTTP ${response.status}:`, errBody);
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
-      if (err.name === 'AbortError') {
-        console.error('[Interview Debug: Technical] Step 3 - API call TIMED OUT after 35s! (Backend server cold start or AI delay)');
-      } else {
-        console.error('[Interview Debug: Technical] Step 3 - Caught API call error:', err.name, err.message, err);
-      }
+      console.error('[Interview Debug: Technical] Step 3 - Caught API call error:', err);
     } finally {
       setEvaluatingFollowup(false);
     }
 
-    try {
-      if (isFollowup && backendNextQ) {
-        setTopicFollowupCount(prev => prev + 1);
-        console.log('[Interview Debug: Technical] Step 4 - Triggering state update: ADAPTIVE FOLLOW-UP:', backendNextQ);
+    // Enforce 1.8s interviewer reflection pause in 'thinking' state
+    const elapsedMs = Date.now() - stopTimestamp;
+    const MIN_PAUSE_MS = 1800;
+    const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
 
-        setCurrentSpokenQuestion(backendNextQ);
-        setCurrentBasedOn('Adaptive AI Probing Follow-Up');
+    setTimeout(() => {
+      const nextSpokenText = backendNextQ || "Thank you for sharing that. Moving on, how do you approach system architecture trade-offs under high concurrency?";
 
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: backendNextQ }]);
-        triggerAISpeech(backendNextQ);
-      } else {
-        const nextIdx = (bankQuestionIdx + 1) % questionsBank.length;
-        setBankQuestionIdx(nextIdx);
+      if (isNewTopic) {
         setTopicFollowupCount(0);
-
-        const nextQObj = questionsBank[nextIdx];
-        const nextQText = backendNextQ || `Moving on to our next topic: ${nextQObj.question}`;
-        console.log(`[Interview Debug: Technical] Step 4 - Triggering state update: NEXT QUESTION (Q${nextIdx + 1}):`, nextQText);
-
-        setCurrentSpokenQuestion(nextQText);
-        setCurrentBasedOn(nextQObj.basedOn || `${companyName} Focus Area`);
-
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextQText }]);
-        triggerAISpeech(nextQText);
+        setCurrentBasedOn(`${companyName} Assessment Focus`);
+      } else {
+        setTopicFollowupCount(prev => prev + 1);
+        setCurrentBasedOn('Conversational Probing & Exploration');
       }
-    } catch (progErr) {
-      console.error('[Interview Debug: Technical] Step 4 - Error during progression state update:', progErr);
-    }
+
+      setCurrentSpokenQuestion(nextSpokenText);
+      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextSpokenText }]);
+      triggerAISpeech(nextSpokenText);
+    }, remainingPauseMs);
   };
 
 
@@ -699,74 +711,67 @@ export default function InterviewRoundPage() {
       {/* Reusable Progress Stepper */}
       <ProgressStepper />
 
-      {/* Unsupported Browser Warning Banner */}
-      {!isBrowserSpeechSupported && (
-        <div className="p-4 rounded-2xl bg-earth-terracotta/20 border border-earth-terracotta/40 text-earth-cream text-xs flex items-center justify-between gap-3 shadow-earthy">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-earth-terracotta shrink-0" />
-            <span>Web Speech API is not fully supported in this browser. We recommend using <strong>Google Chrome</strong> for voice synthesis & recognition.</span>
+      {/* Top Banner Header */}
+      <div className="bg-forest-900 border border-forest-600/30 rounded-2xl p-4 shadow-earthy flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-forest-800 border border-forest-600/40 flex items-center justify-center text-accent-gold shadow-warm-sm">
+            <Brain className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-bold text-white tracking-tight">{companyName} Technical Interview</h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-accent-gold/20 text-accent-gold border border-accent-gold/30">
+                {interviewMode === 'panel' ? 'Panel Mode (2 Interviewers)' : '1-on-1 Mode'}
+              </span>
+            </div>
+            <p className="text-xs text-sage-300">
+              Field: <span className="text-white font-medium">{targetField}</span> | Track: <span className="text-white font-medium">{experienceLevel} ({experienceYears} yrs)</span> | Mode: <span className="text-accent-gold font-medium">{interviewMode}</span>
+            </p>
           </div>
         </div>
-      )}
 
-      {/* Main Grid: AI Interviewer Presence Card & Candidate Feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRestartInterview}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-sage-300 hover:text-white hover:bg-forest-800 transition-all flex items-center gap-1.5 border border-forest-600/30"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Restart Session
+          </button>
+          {!hasStartedSession && (
+            <button
+              onClick={handleStartInterviewSession}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-accent-gold text-forest-900 hover:bg-accent-gold/90 transition-all flex items-center gap-1.5 shadow-warm-sm animate-pulse"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Begin Interview Session
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Grid: Avatar & Video Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         
-        {/* Left Column: AI Interviewer Presence Card & Spoken Captions (5 cols) */}
-        <div className="lg:col-span-5 rounded-3xl bg-forest-800/90 border border-forest-600/40 p-6 space-y-6 shadow-earthy backdrop-blur-md flex flex-col justify-between">
-          
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-forest-600/30 pb-3">
+        {/* Left Column: Interviewer AI Avatar */}
+        <div className="bg-forest-900 border border-forest-600/30 rounded-2xl p-5 shadow-earthy flex flex-col justify-between relative overflow-hidden min-h-[380px]">
+          {/* Header Info */}
+          <div className="flex items-center justify-between z-10">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-sage-400 animate-pulse" />
-              <span className="text-xs font-bold font-serif text-earth-cream">{companyName} AI Recruiter</span>
+              <span className="text-lg">{activePersona.avatarEmoji}</span>
+              <div>
+                <h3 className="text-sm font-bold text-white">{activePersona.name}</h3>
+                <p className="text-[11px] text-sage-300">{activePersona.role} @ {companyName}</p>
+              </div>
             </div>
-
-            {/* Voice Mute & Voice Selector */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setTtsMuted(!ttsMuted);
-                  if (!ttsMuted) stopSpeech();
-                }}
-                className={`p-2 rounded-full text-xs border ${
-                  ttsMuted ? 'bg-earth-terracotta/20 text-earth-terracotta border-earth-terracotta/40' : 'bg-forest-900 text-accent-gold border-forest-600/40'
-                }`}
-                title={ttsMuted ? 'Unmute AI Voice' : 'Mute AI Voice'}
-              >
-                {ttsMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-              </button>
-
-              {availableVoices.length > 0 && (
-                <select
-                  value={selectedVoice?.name || ''}
-                  onChange={(e) => {
-                    const voice = availableVoices.find(v => v.name === e.target.value);
-                    if (voice) setSelectedVoice(voice);
-                  }}
-                  className="bg-forest-900 text-[10px] text-earth-cream/80 p-1.5 rounded-xl border border-forest-600/40 focus:outline-none max-w-[120px] truncate"
-                >
-                  {availableVoices.map((v, i) => (
-                    <option key={i} value={v.name}>{v.name.replace(/Google|Microsoft/gi, '').slice(0, 18)}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+            <span className={`px-2.5 py-0.5 rounded-full text-[10px] ${activePersona.badgeClass}`}>
+              {activePersona.role}
+            </span>
           </div>
 
-          {/* AI Avatar Visualizer */}
-          <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
-            
-            {/* Panel Mode Persona Badge */}
-            {interviewMode === 'panel' && (
-              <div className={`px-4 py-1.5 rounded-full text-xs font-bold border flex items-center gap-2 animate-fadeIn shadow-sm ${activePersona.badgeClass}`}>
-                <span>{activePersona.avatarEmoji}</span>
-                <span>Active Speaker: <strong>{activePersona.name}</strong> ({activePersona.role})</span>
-              </div>
-            )}
-
+          {/* Avatar Center Animation */}
+          <div className="my-auto py-6 flex flex-col items-center justify-center text-center space-y-4 z-10">
             <div className="relative">
-              {/* Outer Pulsing Waveform Ring */}
               <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${
                 aiState === 'speaking' ? 'bg-gradient-to-r from-accent-gold/40 to-sage-400/40 animate-ping ring-4 ring-accent-gold/50'
                 : aiState === 'listening' ? 'bg-earth-terracotta/30 animate-pulse ring-4 ring-earth-terracotta/40'
@@ -801,17 +806,12 @@ export default function InterviewRoundPage() {
                 <span>
                   {aiState === 'speaking' ? `${interviewMode === 'panel' ? activePersona.name : 'Interviewer'} speaking aloud...`
                   : aiState === 'listening' ? 'Listening to your response...'
-                  : aiState === 'thinking' ? 'Preparing next topic...'
+                  : aiState === 'thinking' ? 'Reflecting on your response...'
                   : 'Interviewer Ready'}
                 </span>
               </span>
             </div>
           </div>
-
-          {/* Live Spoken Captions Box */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-bold text-leaf-600 font-serif">
-              <span className="flex items-center gap-1">
                 <MessageSquareText className="w-3.5 h-3.5 text-leaf-600" /> Spoken Question Captions
               </span>
               {currentBasedOn && (
