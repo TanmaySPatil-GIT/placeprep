@@ -688,7 +688,14 @@ export default function InterviewRoundPage() {
     const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
 
     setTimeout(() => {
-      const nextSpokenText = backendNextQ || "Thank you for sharing that. Moving on, how do you approach system architecture trade-offs under high concurrency?";
+      if (!backendNextQ) {
+        const errorMsg = "I encountered an issue generating an AI follow-up response. Please try submitting your response again.";
+        setCurrentSpokenQuestion(errorMsg);
+        setAiState('idle');
+        return;
+      }
+
+      const nextSpokenText = backendNextQ;
 
       if (isNewTopic) {
         setTopicFollowupCount(0);

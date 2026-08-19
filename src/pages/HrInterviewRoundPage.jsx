@@ -536,10 +536,16 @@ export default function HrInterviewRoundPage() {
         console.log('[Interview Debug: HR] Step 3 - Gemini response resolved:', data);
         backendNextQ = data.interviewerResponse || data.questionText;
         isNewTopic = data.moveToNewTopic || data.action === 'next_question';
+      } else {
+        const errBody = await response.text().catch(() => '');
+        console.error(`[Interview Debug: HR] Step 3 - API response error HTTP ${response.status}:`, errBody);
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
       console.error('[Interview Debug: HR] Step 3 - Caught API call error:', err);
+    } finally {
+      // Always guarantee loading state reset
+      setAiState('idle');
     }
 
     // Enforce 1.8s interviewer reflection pause in 'thinking' state
@@ -549,6 +555,13 @@ export default function HrInterviewRoundPage() {
 
     setTimeout(() => {
       if (questionIdx < 7) {
+        if (!backendNextQ) {
+          const errorMsg = "I encountered an issue generating an AI follow-up response. Please try submitting your response again.";
+          setCurrentSpokenQuestion(errorMsg);
+          setAiState('idle');
+          return;
+        }
+
         const nextIdx = questionIdx + 1;
         setQuestionIdx(nextIdx);
         if (isNewTopic) {
@@ -557,7 +570,7 @@ export default function HrInterviewRoundPage() {
           setTopicFollowupCount(prev => prev + 1);
         }
 
-        const nextText = backendNextQ || "Thank you for sharing that. Building on leadership alignment, how do you handle disagreements within a project team?";
+        const nextText = backendNextQ;
         
         setCurrentSpokenQuestion(nextText);
         setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);

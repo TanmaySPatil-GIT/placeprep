@@ -89,16 +89,9 @@ def clean_json_response(raw_text: str) -> str:
 MODEL_FALLBACK_CHAIN = [
     'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite',
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash',
-    'gemini-3.7-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash-8b',
-    'gemini-flash-latest'
+    'gemini-3.7-flash'
 ]
 
 def call_gemini(prompt: str):
@@ -1374,11 +1367,11 @@ JSON Output Required:
         except Exception as e:
             print(f"[Backend Debug] Exception parsing Gemini JSON: {e}")
 
-    # Fallback heuristic logic ONLY if Gemini API call fails or times out
+    # Dynamic emergency fallback logic ONLY if all Gemini API models fail
     last_ans = latest_candidate_answer.strip()
     last_ans_lower = last_ans.lower()
 
-    print(f"[Backend Debug] Gemini generation unavailable/failed. Engaging dynamic fallback for '{interview_type}' round...")
+    print(f"[Backend Debug] Gemini generation unavailable. Engaging dynamic keyword fallback for '{interview_type}' round...")
 
     if not last_ans or last_ans == "No candidate response recorded yet.":
         fallback_text = "I didn't catch your response there — could you check your microphone and give that question a try?"
@@ -1398,7 +1391,16 @@ JSON Output Required:
             "action": "simplifyAndRetry"
         })
 
-    fallback_text = "Got it — thanks for sharing that. Building on your answer, how would you approach scaling or handling edge cases with that setup?"
+    # Extract key nouns/technical terms from candidate answer for dynamic response
+    stopwords = {'that', 'this', 'with', 'have', 'from', 'they', 'them', 'would', 'could', 'about', 'there', 'their', 'which', 'where', 'when', 'what', 'your', 'just', 'some', 'more', 'also'}
+    candidate_keywords = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', last_ans) if w.lower() not in stopwords]
+    extracted_topic = f"'{candidate_keywords[0]}'" if candidate_keywords else "what you mentioned"
+
+    if interview_type == 'technical':
+        fallback_text = f"Thank you for walking me through your thoughts on {extracted_topic}. Could you elaborate on how you handled edge cases or system constraints for that specific component?"
+    else:
+        fallback_text = f"Thank you for sharing your experience regarding {extracted_topic}. How did that situation shape your approach to team collaboration going forward?"
+
     return jsonify({
         "interviewerResponse": fallback_text,
         "questionText": fallback_text,
