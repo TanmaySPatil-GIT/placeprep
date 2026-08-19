@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { PrepProvider } from './context/PrepContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
@@ -30,9 +30,31 @@ const MentorDashboardPage = lazy(() => import('./pages/MentorDashboardPage'));
 const PageFallback = () => (
   <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3 text-warmtext-700">
     <Loader2 className="w-8 h-8 text-rust-500 animate-spin" />
-    <span className="text-xs font-mono font-bold text-rust-600">Loading Diagnostic Module...</span>
+    <span className="text-xs font-mono font-bold text-rust-600">Loading Module...</span>
   </div>
 );
+
+// Root route component: if unauthenticated on initial visit, direct user to /signin
+function RootRoute() {
+  const { currentUser, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6">
+        <div className="w-12 h-12 rounded-2xl bg-rust-500 text-white flex items-center justify-center shadow-glow-rust animate-pulse">
+          <Loader2 className="w-6 h-6 animate-spin" />
+        </div>
+        <p className="text-xs font-mono font-bold text-warmtext-700">Checking Authentication Session...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  return <LandingPage />;
+}
 
 export default function App() {
   return (
@@ -43,8 +65,8 @@ export default function App() {
             <Suspense fallback={<PageFallback />}>
               <Routes>
                 <Route path="/" element={<Layout />}>
-                  {/* Public Routes */}
-                  <Route index element={<LandingPage />} />
+                  {/* Root Route: Redirects to /signin if unauthenticated */}
+                  <Route index element={<RootRoute />} />
                   <Route path="signin" element={<SignInPage />} />
 
                   {/* Protected Functional Routes */}

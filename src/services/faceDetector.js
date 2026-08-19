@@ -68,7 +68,7 @@ export async function analyzeFaceFrame(videoElement) {
   // 1. Validate readyState (HAVE_ENOUGH_DATA >= 2) and video dimensions
   const isVideoReady = videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0;
   if (!isVideoReady) {
-    console.log('[FaceDetection Debug] Video element not ready yet (readyState:', videoElement?.readyState, 'dims:', `${videoElement?.videoWidth}x${videoElement?.videoHeight}`)`);
+    console.log('[FaceDetection Debug] Video element not ready yet (readyState:', videoElement?.readyState, 'dims:', `${videoElement?.videoWidth}x${videoElement?.videoHeight}`);
     return {
       faceDetected: false,
       gazeCentered: false,
