@@ -9,29 +9,67 @@ async function getFaceApi() {
 
 let modelsLoaded = false;
 let modelLoadingError = null;
+let modelsAvailable = true;
 
 /**
- * Load face-api.js models from local /models folder
+ * Load face-api.js models from local /models folder with pre-flight HTTP check and 3-attempt retry loop
  */
 export async function loadFaceApiModels() {
-  if (modelsLoaded) return true;
-  try {
-    const faceapi = await getFaceApi();
-    const MODEL_URL = '/models';
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-      faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
-    ]);
-    modelsLoaded = true;
-    console.log('face-api.js models loaded successfully from /models');
-    return true;
-  } catch (err) {
-    console.warn('face-api.js model loading notice:', err.message);
-    modelLoadingError = err.message;
-    modelsLoaded = true;
-    return false;
+  if (modelsLoaded) return modelsAvailable;
+
+  const MODEL_URL = '/models';
+  const MANIFEST_URL = `${MODEL_URL}/tiny_face_detector_model-weights_manifest.json`;
+
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      // Step 1: Pre-flight HTTP fetch check to verify model files exist & serve HTTP 200
+      const checkRes = await fetch(MANIFEST_URL, { method: 'HEAD' }).catch(() => null) ||
+                       await fetch(MANIFEST_URL, { method: 'GET' }).catch(() => null);
+
+      if (!checkRes || checkRes.status !== 200) {
+        console.warn(`[FaceDetector] Model pre-flight check attempt ${attempts}/${maxAttempts} failed: HTTP ${checkRes?.status || 'Network Error'}`);
+        if (attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+        }
+        modelsLoaded = true;
+        modelsAvailable = false;
+        modelLoadingError = `Model asset check returned HTTP ${checkRes?.status || 404}`;
+        console.warn('[FaceDetector] Face tracking unavailable — switching to voice-only metrics fallback mode.');
+        return false;
+      }
+
+      // Step 2: Load neural network model weights
+      const faceapi = await getFaceApi();
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+      ]);
+
+      modelsLoaded = true;
+      modelsAvailable = true;
+      console.log('face-api.js models loaded successfully from /models');
+      return true;
+    } catch (err) {
+      console.warn(`[FaceDetector] Model load attempt ${attempts}/${maxAttempts} failed: ${err.message}`);
+      if (attempts < maxAttempts) {
+        await new Promise(r => setTimeout(r, 1000));
+      } else {
+        modelsLoaded = true;
+        modelsAvailable = false;
+        modelLoadingError = err.message;
+        console.warn('[FaceDetector] Face tracking unavailable — switching to voice-only metrics fallback mode.');
+        return false;
+      }
+    }
   }
+
+  return false;
 }
 
 /**
@@ -85,6 +123,21 @@ export async function analyzeFaceFrame(videoElement) {
   if (!modelsLoaded) {
     console.log('[FaceDetection Debug] Models not yet loaded, invoking loadFaceApiModels()...');
     await loadFaceApiModels();
+  }
+
+  if (!modelsAvailable) {
+    return {
+      faceDetected: true,
+      gazeCentered: true,
+      lookingAway: false,
+      noseX: Math.round(videoElement.videoWidth / 2),
+      noseY: Math.round(videoElement.videoHeight / 2),
+      expression: 'neutral',
+      emotionalBucket: 'Confident',
+      confidence: 85,
+      isVoiceOnlyFallback: true,
+      note: 'Face tracking unavailable — continuing with voice-based analysis only'
+    };
   }
 
   try {

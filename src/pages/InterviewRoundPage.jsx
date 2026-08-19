@@ -813,11 +813,14 @@ export default function InterviewRoundPage() {
                 </span>
               </span>
             </div>
-          </div>
-                <MessageSquareText className="w-3.5 h-3.5 text-leaf-600" /> Spoken Question Captions
+          {/* Spoken Question Box */}
+          <div className="space-y-2 z-10">
+            <div className="flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sage-300 font-heading">
+                <MessageSquareText className="w-3.5 h-3.5 text-accent-gold" /> Spoken Question Captions
               </span>
               {currentBasedOn && (
-                <span className="text-[10px] text-darkcharcoal-500 truncate max-w-[180px]">
+                <span className="text-[10px] text-sage-400 truncate max-w-[180px]">
                   Tag: {currentBasedOn}
                 </span>
               )}
@@ -826,7 +829,7 @@ export default function InterviewRoundPage() {
             <div className="p-4 rounded-2xl bg-mint-50 border border-warmborder text-xs sm:text-sm leading-relaxed font-serif text-darkcharcoal-900 min-h-[110px] flex items-center justify-center text-center">
               {hasStartedSession ? (
                 currentSpokenQuestion ? (
-                  <p>"{currentSpokenQuestion}"</p>
+                  <p>&quot;{currentSpokenQuestion}&quot;</p>
                 ) : (
                   <p className="text-darkcharcoal-500 italic">Preparing next interview question...</p>
                 )
@@ -900,7 +903,14 @@ export default function InterviewRoundPage() {
             {/* Live Eye Contact Indicator */}
             {cameraPermission === 'granted' && (
               <div className="absolute top-4 right-4 z-10 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-forest-900/90 backdrop-blur-md border border-forest-600/40 shadow-lg">
-                {currentTelemetry.faceDetected ? (
+                {currentTelemetry?.isVoiceOnlyFallback ? (
+                  <>
+                    <span className="w-2.5 h-2.5 rounded-full bg-accent-gold animate-pulse shrink-0" />
+                    <span className="text-xs font-bold text-accent-gold flex items-center gap-1">
+                      <Mic className="w-3.5 h-3.5 text-accent-gold" /> Face tracking unavailable — voice mode active
+                    </span>
+                  </>
+                ) : currentTelemetry.faceDetected ? (
                   currentTelemetry.gazeCentered ? (
                     <>
                       <span className="w-3 h-3 rounded-full bg-sage-400 animate-ping shrink-0" />
@@ -1046,6 +1056,7 @@ export default function InterviewRoundPage() {
 
       </div>
 
+    </div>
     </div>
   );
 }
