@@ -4,10 +4,12 @@ import { AuthProvider } from './context/AuthContext';
 import { PrepProvider } from './context/PrepContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
+import ProtectedRoute from './components/ProtectedRoute';
 import { Loader2 } from 'lucide-react';
 
 // Lazy-loaded page components for fast initial bundle loading
 const LandingPage = lazy(() => import('./pages/LandingPage'));
+const SignInPage = lazy(() => import('./pages/SignInPage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const SelectFieldPage = lazy(() => import('./pages/SelectFieldPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -26,9 +28,9 @@ const RecommendationsPage = lazy(() => import('./pages/RecommendationsPage'));
 const MentorDashboardPage = lazy(() => import('./pages/MentorDashboardPage'));
 
 const PageFallback = () => (
-  <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3 text-earth-cream">
-    <Loader2 className="w-8 h-8 text-accent-gold animate-spin" />
-    <span className="text-xs font-mono font-bold text-accent-gold">Loading Page Component...</span>
+  <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3 text-warmtext-700">
+    <Loader2 className="w-8 h-8 text-rust-500 animate-spin" />
+    <span className="text-xs font-mono font-bold text-rust-600">Loading Diagnostic Module...</span>
   </div>
 );
 
@@ -41,23 +43,27 @@ export default function App() {
             <Suspense fallback={<PageFallback />}>
               <Routes>
                 <Route path="/" element={<Layout />}>
+                  {/* Public Routes */}
                   <Route index element={<LandingPage />} />
-                  <Route path="onboarding" element={<OnboardingPage />} />
-                  <Route path="select-field" element={<SelectFieldPage />} />
-                  <Route path="dashboard" element={<DashboardPage />} />
-                  <Route path="companies" element={<CompaniesPage />} />
-                  <Route path="resume" element={<ResumePage />} />
-                  <Route path="round/aptitude" element={<AptitudeRoundPage />} />
-                  <Route path="round/tech-mcq" element={<TechnicalMcqRoundPage />} />
-                  <Route path="round/dsa" element={<DsaRoundPage />} />
-                  <Route path="round/system-design" element={<SystemDesignRoundPage />} />
-                  <Route path="round/interview" element={<InterviewRoundPage />} />
-                  <Route path="round/hr-interview" element={<HrInterviewRoundPage />} />
-                  <Route path="round/negotiation" element={<NegotiationRoundPage />} />
-                  <Route path="results" element={<ResultsPage />} />
-                  <Route path="final-report" element={<FinalReportPage />} />
-                  <Route path="recommendations" element={<RecommendationsPage />} />
-                  <Route path="mentor-dashboard" element={<MentorDashboardPage />} />
+                  <Route path="signin" element={<SignInPage />} />
+
+                  {/* Protected Functional Routes */}
+                  <Route path="onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+                  <Route path="select-field" element={<ProtectedRoute><SelectFieldPage /></ProtectedRoute>} />
+                  <Route path="dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+                  <Route path="companies" element={<ProtectedRoute><CompaniesPage /></ProtectedRoute>} />
+                  <Route path="resume" element={<ProtectedRoute><ResumePage /></ProtectedRoute>} />
+                  <Route path="round/aptitude" element={<ProtectedRoute><AptitudeRoundPage /></ProtectedRoute>} />
+                  <Route path="round/tech-mcq" element={<ProtectedRoute><TechnicalMcqRoundPage /></ProtectedRoute>} />
+                  <Route path="round/dsa" element={<ProtectedRoute><DsaRoundPage /></ProtectedRoute>} />
+                  <Route path="round/system-design" element={<ProtectedRoute><SystemDesignRoundPage /></ProtectedRoute>} />
+                  <Route path="round/interview" element={<ProtectedRoute><InterviewRoundPage /></ProtectedRoute>} />
+                  <Route path="round/hr-interview" element={<ProtectedRoute><HrInterviewRoundPage /></ProtectedRoute>} />
+                  <Route path="round/negotiation" element={<ProtectedRoute><NegotiationRoundPage /></ProtectedRoute>} />
+                  <Route path="results" element={<ProtectedRoute><ResultsPage /></ProtectedRoute>} />
+                  <Route path="final-report" element={<ProtectedRoute><FinalReportPage /></ProtectedRoute>} />
+                  <Route path="recommendations" element={<ProtectedRoute><RecommendationsPage /></ProtectedRoute>} />
+                  <Route path="mentor-dashboard" element={<ProtectedRoute><MentorDashboardPage /></ProtectedRoute>} />
                 </Route>
               </Routes>
             </Suspense>

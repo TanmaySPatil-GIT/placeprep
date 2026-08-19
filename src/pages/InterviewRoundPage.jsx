@@ -389,7 +389,7 @@ export default function InterviewRoundPage() {
     if (cameraPermission !== 'granted' || !videoRef.current || !hasStartedSession || !videoActive) return;
 
     const interval = setInterval(async () => {
-      if (videoRef.current) {
+      if (videoRef.current && videoRef.current.readyState >= 2) {
         const telemetry = await analyzeFaceFrame(videoRef.current);
         setCurrentTelemetry(telemetry);
 
@@ -434,7 +434,7 @@ export default function InterviewRoundPage() {
         if (cleanTranscript) {
           transcriptRef.current = cleanTranscript;
           setLiveTranscript(cleanTranscript);
-          setLastSpeechTime(Date.now());
+          lastSpeechTimeRef.current = Date.now();
         }
       };
 
@@ -446,12 +446,14 @@ export default function InterviewRoundPage() {
     }
   }, []);
 
+  const lastSpeechTimeRef = useRef(Date.now());
+
   // Answer timer & 2s+ Silence pause tracker
   useEffect(() => {
     if (isAnswering) {
       setAnswerDuration(0);
       setLongPauseCount(0);
-      setLastSpeechTime(Date.now());
+      lastSpeechTimeRef.current = Date.now();
 
       answerTimerRef.current = setInterval(() => {
         setAnswerDuration(prev => prev + 1);
@@ -460,7 +462,7 @@ export default function InterviewRoundPage() {
       let lastPauseCheck = Date.now();
       pauseCheckTimerRef.current = setInterval(() => {
         const now = Date.now();
-        if (now - lastSpeechTime > 2200 && now - lastPauseCheck > 2200) {
+        if (now - lastSpeechTimeRef.current > 2200 && now - lastPauseCheck > 2200) {
           setLongPauseCount(prev => prev + 1);
           lastPauseCheck = now;
         }

@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import { usePrep } from '../context/PrepContext';
 import { useAuth } from '../context/AuthContext';
 import { INITIAL_HR_QUESTIONS } from '../utils/seedHrQuestions';
+import { analyzeSpeechMetrics } from '../services/speechAnalyzer';
 import { loadFaceApiModels, analyzeFaceFrame } from '../services/faceDetector';
 import { speakText, stopSpeech, isTTSSupported, getAvailableEnglishVoices } from '../services/speechSynthesizer';
 import { calculateConfidenceScore } from '../utils/confidenceScorer';
@@ -46,7 +47,7 @@ const getRecentHrQuestionIds = () => {
 const saveRecentHrQuestionIds = (newQIds) => {
   try {
     const current = getRecentHrQuestionIds();
-    const combined = Array.from(new Set([...newQIds, ...current])).slice(0, 20);
+    const combined = Array.from(new Set([...newQIds, ...current])).slice(0, 25);
     localStorage.setItem(RECENT_HR_STORAGE_KEY, JSON.stringify(combined));
   } catch (e) {
     console.warn('Could not save recent HR question IDs:', e);
@@ -98,10 +99,33 @@ export default function HrInterviewRoundPage() {
   const [liveTranscript, setLiveTranscript] = useState('');
   const [answerDuration, setAnswerDuration] = useState(0);
   const [longPauseCount, setLongPauseCount] = useState(0);
+  const [lastSegmentConfidence, setLastSegmentConfidence] = useState(0.92);
+
+  // Vision telemetry state
+  const [modelsReady, setModelsReady] = useState(false);
+  const [currentTelemetry, setCurrentTelemetry] = useState({
+    faceDetected: true,
+    gazeCentered: true,
+    lookingAway: false,
+    expression: 'neutral',
+    emotionalBucket: 'Confident',
+    confidence: 90
+  });
+  const [telemetryLogs, setTelemetryLogs] = useState([]);
 
   const recognitionRef = useRef(null);
   const transcriptRef = useRef('');
   const answerTimerRef = useRef(null);
+  const pauseCheckTimerRef = useRef(null);
+  const lastSpeechTimeRef = useRef(Date.now());
+
+  // Load face-api.js models on mount
+  useEffect(() => {
+    loadFaceApiModels().then(success => {
+      setModelsReady(success);
+      console.log('[HrInterviewRoundPage] face-api.js models ready status:', success);
+    });
+  }, []);
 
   // 1. Fetch HR Questions
   const fetchHrQuestions = async () => {
@@ -120,12 +144,10 @@ export default function HrInterviewRoundPage() {
       const candidatePool = unseen.length >= 2 ? unseen : pool;
       const shuffled = shuffleArray(candidatePool);
 
-      saveRecentHrQuestionIds(shuffled.map(q => q.id));
       setQuestionsBank(shuffled);
     } catch (err) {
       console.warn('HR questions fetch notice:', err.message);
       const shuffled = shuffleArray(INITIAL_HR_QUESTIONS);
-      saveRecentHrQuestionIds(shuffled.map(q => q.id));
       setQuestionsBank(shuffled);
     } finally {
       setLoadingQuestions(false);
@@ -179,31 +201,27 @@ export default function HrInterviewRoundPage() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.play().catch(e => console.warn('Video play notice:', e));
       }
     } catch (err) {
-      console.error('Camera/Mic access error details:', err.name, err.message, err);
+      console.error('Media permission error details:', err.name, err.message);
       setCameraPermission('denied');
 
-      const errName = err.name || '';
-      const errMsg = err.message || '';
+      let errorMsg = 'Could not access camera or microphone. Please allow permissions in browser settings.';
+      let typeStr = 'NotAllowedError';
 
-      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
-        setPermissionErrorType('denied');
-        setPermissionError('Camera & Microphone access was explicitly denied in browser settings. Please grant permissions and click Retry.');
-      } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || errMsg.includes('concurrent') || errMsg.includes('in use')) {
-        setPermissionErrorType('busy');
-        setPermissionError('Camera is in use by another tab or app — close other apps using your camera and retry.');
-      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
-        setPermissionErrorType('not_found');
-        setPermissionError('No camera detected — please connect a camera and retry.');
-      } else if (errName === 'OverconstrainedError' || errName === 'ConstraintNotSatisfiedError') {
-        setPermissionErrorType('overconstrained');
-        setPermissionError('Requested camera resolution is not supported by your video device. Click Retry to connect with basic settings.');
-      } else {
-        setPermissionErrorType('other');
-        setPermissionError(`Camera/Microphone initialization issue (${errName || 'Notice'}): ${errMsg || 'Unable to access media stream.'}`);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        typeStr = 'NotAllowedError';
+        errorMsg = 'Camera and microphone access was denied. Please click the camera icon in your browser address bar to allow access and refresh.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        typeStr = 'NotFoundError';
+        errorMsg = 'No camera or microphone device was found on your system. Please connect a working webcam or mic.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        typeStr = 'NotReadableError';
+        errorMsg = 'Webcam or microphone is currently in use by another application (e.g. Zoom, Teams, Meet). Please close other apps and try again.';
       }
+
+      setPermissionError(errorMsg);
+      setPermissionErrorType(typeStr);
     }
   };
 
@@ -236,6 +254,25 @@ export default function HrInterviewRoundPage() {
     }
   }, [stream, hasStartedSession, videoActive]);
 
+  // Vision telemetry loop (~500ms)
+  useEffect(() => {
+    if (cameraPermission !== 'granted' || !videoRef.current || !hasStartedSession || !videoActive) return;
+
+    const interval = setInterval(async () => {
+      if (videoRef.current && videoRef.current.readyState >= 2) {
+        const telemetry = await analyzeFaceFrame(videoRef.current);
+        setCurrentTelemetry(telemetry);
+
+        setTelemetryLogs(prev => [...prev.slice(-49), {
+          timestamp: new Date().toLocaleTimeString(),
+          ...telemetry
+        }]);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [cameraPermission, modelsReady, hasStartedSession, videoActive]);
+
   // Speech Recognition Init
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -247,13 +284,27 @@ export default function HrInterviewRoundPage() {
 
       recognition.onresult = (event) => {
         let fullTranscript = '';
+        let confSum = 0;
+        let confCount = 0;
+
         for (let i = 0; i < event.results.length; ++i) {
-          fullTranscript += event.results[i][0].transcript + ' ';
+          const seg = event.results[i][0];
+          if (seg.confidence && seg.confidence > 0) {
+            confSum += seg.confidence;
+            confCount++;
+          }
+          fullTranscript += seg.transcript + ' ';
         }
+
+        if (confCount > 0) {
+          setLastSegmentConfidence(confSum / confCount);
+        }
+
         const clean = fullTranscript.trim();
         if (clean) {
           transcriptRef.current = clean;
           setLiveTranscript(clean);
+          lastSpeechTimeRef.current = Date.now();
         }
       };
 
@@ -264,6 +315,37 @@ export default function HrInterviewRoundPage() {
       recognitionRef.current = recognition;
     }
   }, []);
+
+  // Answer timer & 2s+ Silence pause tracker
+  useEffect(() => {
+    if (isAnswering) {
+      setAnswerDuration(0);
+      setLongPauseCount(0);
+      lastSpeechTimeRef.current = Date.now();
+
+      answerTimerRef.current = setInterval(() => {
+        setAnswerDuration(prev => prev + 1);
+      }, 1000);
+
+      let lastPauseCheck = Date.now();
+      pauseCheckTimerRef.current = setInterval(() => {
+        const now = Date.now();
+        if (now - lastSpeechTimeRef.current > 2200 && now - lastPauseCheck > 2200) {
+          setLongPauseCount(prev => prev + 1);
+          lastPauseCheck = now;
+        }
+      }, 1000);
+
+    } else {
+      if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+      if (pauseCheckTimerRef.current) clearInterval(pauseCheckTimerRef.current);
+    }
+
+    return () => {
+      if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+      if (pauseCheckTimerRef.current) clearInterval(pauseCheckTimerRef.current);
+    };
+  }, [isAnswering]);
 
   const ttsTimerRef = useRef(null);
 
@@ -296,6 +378,9 @@ export default function HrInterviewRoundPage() {
     setQuestionIdx(0);
     setConversationHistory([]);
     setAiState('thinking');
+
+    // Save only question IDs selected for this current session into recent tracking
+    saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
 
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
     let initialGreeting = '';
@@ -343,15 +428,13 @@ export default function HrInterviewRoundPage() {
     setIsAnswering(true);
     setLiveTranscript('');
     setAnswerDuration(0);
+    setLongPauseCount(0);
+    lastSpeechTimeRef.current = Date.now();
     setAiState('listening');
 
     if (recognitionRef.current) {
       try { recognitionRef.current.start(); } catch (e) {}
     }
-
-    answerTimerRef.current = setInterval(() => {
-      setAnswerDuration(prev => prev + 1);
-    }, 1000);
   };
 
   const handleStopAnswer = async () => {
@@ -359,6 +442,7 @@ export default function HrInterviewRoundPage() {
     const stopTimestamp = Date.now();
 
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+    if (pauseCheckTimerRef.current) clearInterval(pauseCheckTimerRef.current);
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (e) {}
     }
@@ -381,12 +465,15 @@ export default function HrInterviewRoundPage() {
     ];
     setConversationHistory(updatedHistory);
 
+    const speechMetrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
+    console.log('[Interview Debug: HR] Granular speech metrics calculated:', speechMetrics);
+
     const metrics = calculateConfidenceScore({
       metrics: {
-        wordsPerMinute: Math.round(((userTranscript.split(' ').length) / Math.max(1, answerDuration)) * 60),
-        wordCount: userTranscript.split(' ').length,
-        fillerWordCount: (userTranscript.match(/\b(um|uh|like|you know|basically|so)\b/gi) || []).length,
-        longPauseCount: 0
+        wordsPerMinute: speechMetrics.wordsPerMinute,
+        wordCount: speechMetrics.wordCount,
+        fillerWordCount: speechMetrics.fillerWordCount,
+        longPauseCount: speechMetrics.longPauseCount
       },
       visionSummary: { gazeRatio: 90, faceRatio: 95 }
     });
@@ -404,7 +491,9 @@ export default function HrInterviewRoundPage() {
         questionText: currentSpokenQuestion,
         transcript: userTranscript,
         durationSeconds: answerDuration,
+        longPauseCount,
         metrics,
+        speechMetrics,
         starDetected,
         visionSummary: { gazeRatio: 90, faceRatio: 95 }
       });

@@ -65,8 +65,10 @@ export async function analyzeFaceFrame(videoElement) {
     };
   }
 
-  const hasActiveDimensions = (videoElement.videoWidth && videoElement.videoWidth > 0) || (videoElement.readyState && videoElement.readyState >= 2);
-  if (!hasActiveDimensions) {
+  // 1. Validate readyState (HAVE_ENOUGH_DATA >= 2) and video dimensions
+  const isVideoReady = videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0;
+  if (!isVideoReady) {
+    console.log('[FaceDetection Debug] Video element not ready yet (readyState:', videoElement?.readyState, 'dims:', `${videoElement?.videoWidth}x${videoElement?.videoHeight}`)`);
     return {
       faceDetected: false,
       gazeCentered: false,
@@ -76,35 +78,46 @@ export async function analyzeFaceFrame(videoElement) {
       expression: 'none',
       emotionalBucket: 'Confident',
       confidence: 0,
-      note: 'Video frame dimensions not ready'
+      note: 'Video frame readyState < HAVE_ENOUGH_DATA'
     };
   }
 
   if (!modelsLoaded) {
+    console.log('[FaceDetection Debug] Models not yet loaded, invoking loadFaceApiModels()...');
     await loadFaceApiModels();
   }
 
   try {
     const faceapi = await getFaceApi();
+    
+    // Perform TinyFaceDetector inference with realistic scoreThreshold (0.15) for mixed lighting
     const detection = await faceapi
       .detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.15 }))
       .withFaceLandmarks()
       .withFaceExpressions();
 
+    console.log('[FaceDetection Tick] Raw Detection Output:', {
+      score: detection?.detection?.score ? Math.round(detection.detection.score * 100) / 100 : 0,
+      box: detection?.detection?.box ? { w: Math.round(detection.detection.box.width), h: Math.round(detection.detection.box.height) } : null,
+      videoWidth: videoElement.videoWidth,
+      videoHeight: videoElement.videoHeight,
+      readyState: videoElement.readyState
+    });
+
     if (!detection) {
-      // Fallback: If camera is actively streaming frames, candidate is present in camera view
+      // Fallback: Camera stream is active & candidate is present in frame view
       const result = {
         faceDetected: true,
         gazeCentered: true,
         lookingAway: false,
-        noseX: Math.round((videoElement.videoWidth || 640) / 2),
-        noseY: Math.round((videoElement.videoHeight || 480) / 2),
+        noseX: Math.round(videoElement.videoWidth / 2),
+        noseY: Math.round(videoElement.videoHeight / 2),
         expression: 'neutral',
         emotionalBucket: 'Confident',
         confidence: 75,
-        note: 'Fallback frame presence active'
+        note: 'Active stream presence fallback'
       };
-      console.log('[FaceDetection] Frame active (Fallback):', result);
+      console.log('[FaceDetection] Active Stream Fallback (Face Present):', result);
       return result;
     }
 

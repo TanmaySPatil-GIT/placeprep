@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 // PlacePrep Firebase Configuration
@@ -27,8 +27,13 @@ if (!firebaseConfig.apiKey) {
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Services
+// Initialize Firebase Services & Explicit Local Persistence
 export const auth = getAuth(app);
+
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('[PlacePrep] Could not set browser local persistence:', err.message);
+});
+
 export const db = getFirestore(app);
 
 export default app;

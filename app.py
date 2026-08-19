@@ -1307,6 +1307,20 @@ Return ONLY valid raw JSON:
 
     history_block = "\n".join(history_formatted) if history_formatted else "Interview session opening."
 
+    # Check for uncertainty / 'I don't know' expressions
+    last_ans_lower = latest_candidate_answer.lower()
+    is_idk_answer = any(phrase in last_ans_lower for phrase in ["don't know", "dont know", "not sure", "no idea", "idk", "haven't used", "unfamiliar", "no experience", "can't recall", "cant recall"])
+
+    idk_directive = ""
+    if is_idk_answer:
+        idk_directive = """
+CRITICAL RULE (CANDIDATE STATED THEY DON'T KNOW):
+The candidate just expressed that they don't know or are unsure about the question/topic.
+1. You MUST set "moveToNewTopic": false. DO NOT move to a new question or topic.
+2. You MUST cross-question or simplify: ask them why they don't know, what related concepts they ARE familiar with, or break the question down into a simpler foundational concept to test their reasoning process.
+3. Do NOT praise them for saying they don't know, but maintain a natural, supportive, inquiring interviewer tone.
+"""
+
     prompt = f"""You are an experienced human interviewer conducting a live {interview_type.upper()} interview for {company_name} for the role of {target_field} ({experience_level} level, {difficulty_level} difficulty). You are not a quiz bot reading questions off a list — you are a real person having a conversation, genuinely listening to what the candidate says, and reacting the way a sharp, experienced interviewer actually would.
 
 Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said and let that genuinely shape your response:
@@ -1318,7 +1332,7 @@ Your core instinct in every exchange: never just accept an answer at face value 
 - Match your reactions to what was actually said — never respond with praise or enthusiasm to a weak or non-answer, and never respond flatly to a genuinely strong one. Your tone should track the quality of what you just heard, like a real person's would.
 
 You decide, turn by turn, based on the actual content of what the candidate just said, whether to: dig deeper into their last answer, simplify/rephrase because they're struggling, gently challenge something they claimed, or move to a new question because this one has been sufficiently explored. Don't follow a fixed pattern — vary it the way a real interview naturally varies, and let the candidate's actual answers be what drives your decisions, not a script.
-
+{idk_directive}
 LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
 
 You have {remaining_exchanges} remaining exchanges available in this interview before it needs to wrap up — pace yourself accordingly, but never sacrifice a genuine follow-up just because you're mid-list. Use your judgment like a real interviewer would.
@@ -1345,6 +1359,10 @@ JSON Output Required:
             parsed_json = json.loads(cleaned_text)
             resp_text = parsed_json.get('interviewerResponse') or parsed_json.get('questionText') or ''
             move_new = bool(parsed_json.get('moveToNewTopic', False))
+
+            if is_idk_answer:
+                print("[Backend Debug] Candidate expressed 'I don't know' — forcing moveToNewTopic to False for cross-examination")
+                move_new = False
 
             print(f"[Backend Debug] Parsed Response -> MoveToNewTopic: {move_new}, Response: '{resp_text}'")
             return jsonify({

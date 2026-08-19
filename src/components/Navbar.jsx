@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import AuthModal from './AuthModal';
 import { 
@@ -25,6 +25,7 @@ import Logo from './Logo';
 
 export default function Navbar() {
   const { currentUser, userProfile, logout } = useAuth();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -35,6 +36,17 @@ export default function Navbar() {
   const prepRef = useRef(null);
   const prepTimeoutRef = useRef(null);
   const location = useLocation();
+
+  const handleSignOut = async () => {
+    try {
+      await logout();
+      setProfileDropdownOpen(false);
+      setMobileMenuOpen(false);
+      navigate('/signin');
+    } catch (err) {
+      console.warn('Sign out notice:', err);
+    }
+  };
 
   const isMentor = userProfile?.role === 'mentor';
 
@@ -342,8 +354,8 @@ export default function Navbar() {
                         </Link>
 
                         <button
-                          onClick={() => { logout(); setProfileDropdownOpen(false); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                          onClick={handleSignOut}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                         >
                           <LogOut className="w-4 h-4" />
                           <span>Sign Out</span>
@@ -354,13 +366,13 @@ export default function Navbar() {
 
                 </div>
               ) : (
-                <button
-                  onClick={() => setAuthModalOpen(true)}
+                <Link
+                  to="/signin"
                   className="flex items-center gap-2 px-5 py-2.5 text-xs font-extrabold rounded-full bg-rust-500 hover:bg-rust-600 text-white shadow-glow-rust hover:scale-[1.02] active:scale-[0.98] transition-all duration-200"
                 >
                   <User className="w-4 h-4" />
                   <span>Sign In / Register</span>
-                </button>
+                </Link>
               )}
             </div>
 
@@ -472,20 +484,21 @@ export default function Navbar() {
             <div className="pt-2 border-t border-warmborder/60">
               {currentUser || userProfile ? (
                 <button
-                  onClick={() => { logout(); setMobileMenuOpen(false); }}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-white hover:bg-rust-50 text-rust-600 text-sm font-semibold border border-warmborder shadow-warm-sm transition-colors"
+                  onClick={handleSignOut}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-white hover:bg-rust-50 text-rust-600 text-sm font-semibold border border-warmborder shadow-warm-sm transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>Sign Out ({userProfile?.name || 'User'})</span>
                 </button>
               ) : (
-                <button
-                  onClick={() => { setAuthModalOpen(true); setMobileMenuOpen(false); }}
+                <Link
+                  to="/signin"
+                  onClick={() => setMobileMenuOpen(false)}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-rust-500 text-white text-sm font-extrabold shadow-glow-rust hover:bg-rust-600 transition-colors"
                 >
                   <User className="w-4 h-4" />
                   <span>Sign In / Register</span>
-                </button>
+                </Link>
               )}
             </div>
           </div>
