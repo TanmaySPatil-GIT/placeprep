@@ -516,7 +516,7 @@ export default function HrInterviewRoundPage() {
     console.log('[Interview Debug: HR] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 35000);
+    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
 
     let backendNextQ = null;
     let isNewTopic = false;

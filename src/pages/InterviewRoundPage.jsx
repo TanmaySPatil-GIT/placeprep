@@ -244,7 +244,7 @@ export default function InterviewRoundPage() {
     setLoadingQuestions(true);
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Interview questions fetch timeout')), 1500)
+        setTimeout(() => reject(new Error('Interview questions fetch timeout')), 12000)
       );
 
       const snap = await Promise.race([
@@ -649,7 +649,7 @@ export default function InterviewRoundPage() {
     console.log('[Interview Debug: Technical] Step 2 - Payload sent to /api/interview-followup:', payload);
 
     const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 35000);
+    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
 
     let backendNextQ = null;
     let isNewTopic = false;
