@@ -16,6 +16,12 @@ import {
 } from '../services/speechSynthesizer';
 import { INITIAL_INTERVIEW_QUESTIONS } from '../utils/seedInterviewQuestions';
 import { 
+  initializeInterviewSession, 
+  updateStateAfterTurn, 
+  buildPromptContextFromState 
+} from '../services/conversationStateManager.js';
+import { executeInterviewTurn, executeOpeningTurn } from '../services/interviewPipeline.js';
+import { 
   Video, 
   Mic, 
   MicOff, 
@@ -99,6 +105,7 @@ export default function InterviewRoundPage() {
   const [currentBasedOn, setCurrentBasedOn] = useState('');
   const [aiState, setAiState] = useState('idle'); // 'speaking' | 'listening' | 'thinking' | 'idle'
   const [aiReasoning, setAiReasoning] = useState('');
+  const [sessionState, setSessionState] = useState(null);
 
   // Video & Stream refs
   const videoRef = useRef(null);
@@ -486,34 +493,25 @@ export default function InterviewRoundPage() {
     setConversationHistory([]);
     setAiState('thinking');
 
-    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    let openingText = '';
-
+    // Initialize Conversation State Document in Firestore
     try {
-      const response = await fetch(FLASK_FOLLOWUP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedCompany: companyName,
-          targetField,
-          interviewType: 'technical',
-          experienceLevel: experienceLevel || 'Fresher',
-          experienceYears: experienceYears || '0-2',
-          difficultyLevel: difficultyLevel || 'Medium',
-          selectedLanguage: selectedLanguage?.name || 'English',
-          interviewerPersona: interviewerPersona || 'Friendly',
-          isOpening: true
-        })
+      const initSession = await initializeInterviewSession({
+        userId: userProfile?.uid || 'user_anon',
+        selectedCompany: companyName,
+        selectedField: targetFieldId,
+        roundType: 'technical',
+        difficultyLevel: difficultyLevel || 'medium'
       });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.questionText) {
-          openingText = data.questionText;
-        }
-      }
-    } catch (e) {
-      console.warn('Opening question fetch notice:', e);
+      setSessionState(initSession);
+    } catch (err) {
+      console.warn('Session initialization notice:', err.message);
     }
+
+    let openingText = await executeOpeningTurn({
+      sessionState: initSession,
+      roundType: 'technical',
+      backendUrl: getBackendUrl()
+    });
 
     if (!openingText) {
       const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
@@ -641,52 +639,32 @@ export default function InterviewRoundPage() {
     console.log('[Interview Debug: Technical] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
     console.log('=============================================================================\n');
 
-    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    const payload = {
-      selectedCompany: companyName,
-      targetField,
-      interviewType: 'technical',
-      experienceLevel: experienceLevel || 'Fresher',
-      experienceYears: experienceYears || '0-2',
-      difficultyLevel: difficultyLevel || 'Medium',
-      selectedLanguage: selectedLanguage?.name || 'English',
-      interviewerPersona: interviewerPersona || 'Friendly',
-      conversationHistory: updatedHistory,
-      topicFollowupCount
-    };
-
-    console.log('[Interview Debug: Technical] Step 2 - Payload sent to /api/interview-followup:', payload);
-
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
-
     let backendNextQ = null;
     let isNewTopic = false;
 
     try {
-      const response = await fetch(FLASK_FOLLOWUP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const turnResult = await executeInterviewTurn({
+        sessionState,
+        question: currentSpokenQuestion,
+        studentAnswer: userTranscript,
+        roundType: 'technical',
+        currentTopicId: sessionState?.currentTopicId || 'oop-inheritance',
+        backendUrl: getBackendUrl(),
         signal: controller.signal
       });
 
       clearTimeout(fetchTimeout);
 
-      console.log(`[Interview Debug: Technical] Step 3 - API response status: ${response.status} ${response.statusText}`);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[Interview Debug: Technical] Step 3 - Gemini response resolved:', data);
-        backendNextQ = data.interviewerResponse || data.questionText;
-        isNewTopic = data.moveToNewTopic || data.action === 'next_question';
-      } else {
-        const errBody = await response.text().catch(() => '');
-        console.error(`[Interview Debug: Technical] Step 3 - API response error HTTP ${response.status}:`, errBody);
+      if (turnResult) {
+        backendNextQ = turnResult.interviewerResponse;
+        isNewTopic = turnResult.isNewTopic;
+        if (turnResult.updatedSessionState) {
+          setSessionState(turnResult.updatedSessionState);
+        }
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
-      console.error('[Interview Debug: Technical] Step 3 - Caught API call error:', err);
+      console.error('[Interview Debug: Technical] Turn pipeline error:', err);
     } finally {
       setEvaluatingFollowup(false);
     }
@@ -830,6 +808,36 @@ export default function InterviewRoundPage() {
               </span>
             </div>
           </div>
+
+          {/* Topic Plan Progress Bar (Driven by Conversation State Manager) */}
+          {sessionState && sessionState.topicPlan && sessionState.topicPlan.length > 0 && (
+            <div className="mb-2 p-2.5 bg-forest-800/70 border border-forest-600/30 rounded-xl space-y-1.5 z-10">
+              <div className="flex items-center justify-between text-[11px] font-bold text-sage-200">
+                <span className="flex items-center gap-1">
+                  <Target className="w-3.5 h-3.5 text-accent-gold" /> Active Topic Plan
+                </span>
+                <span className="text-[10px] text-accent-gold font-mono">
+                  Topic Depth: {sessionState.currentDepth}/3 cross-q
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                {sessionState.topicPlan.map((t, idx) => (
+                  <span
+                    key={t.topicId || idx}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap border transition-all ${
+                      t.status === 'completed'
+                        ? 'bg-mint-100/90 text-leaf-800 border-warmborder'
+                        : t.status === 'in_progress'
+                        ? 'bg-accent-gold text-forest-900 border-accent-gold shadow-warm-sm animate-pulse'
+                        : 'bg-forest-900/80 text-sage-400 border-forest-600/40 opacity-70'
+                    }`}
+                  >
+                    {idx + 1}. {t.topicName} {t.mastery !== null ? `(${t.mastery}%)` : ''}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Spoken Question Box */}
           <div className="space-y-2 z-10 mt-auto">

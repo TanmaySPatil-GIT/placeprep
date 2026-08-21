@@ -568,18 +568,872 @@ Return this exact JSON structure:
                 "basedOn": first_proj,
                 "focusArea": f"{company_name} Ownership & End-to-End Execution"
             },
-            {
-                "question": f"If you had to refactor {first_proj} to handle 100x user concurrency, what database or caching bottlenecks would break first?",
-                "basedOn": first_proj,
-                "focusArea": "Scalability & Performance Benchmarking"
-            },
-            {
-                "question": f"How do you approach automated testing and continuous integration in projects like {first_proj}?",
-                "basedOn": first_proj,
-                "focusArea": "Software Engineering Best Practices"
-            }
         ]
     })
+
+
+@app.route('/api/evaluate-answer-rubric', methods=['POST', 'OPTIONS'])
+def evaluate_answer_rubric():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+RUBRIC_DATABASE = {
+    'oop-inheritance': {
+        'topicId': 'oop-inheritance',
+        'topicName': 'OOP - Inheritance',
+        'keyConcepts': [
+            'Inheritance allows a subclass to derive attributes and methods from a superclass to enable code reuse',
+            'Establishes a strict "is-a" subtype relationship between parent and child classes',
+            'Supports runtime polymorphism via method overriding (subclass re-implementing superclass methods)',
+            'Composition ("has-a") is often preferred over inheritance to avoid tight coupling and the fragile base class problem'
+        ],
+        'commonMisconceptions': [
+            'Confusing method overriding (same signature, runtime) with method overloading (different signature, compile-time)',
+            'Thinking private members of a parent class are directly accessible in child classes',
+            'Assuming inheritance is always the best mechanism for reusing code across unrelated classes'
+        ]
+    },
+    'oop-polymorphism': {
+        'topicId': 'oop-polymorphism',
+        'topicName': 'OOP - Polymorphism',
+        'keyConcepts': [
+            'Polymorphism allows objects of different classes to be treated as objects of a common superclass or interface',
+            'Compile-time (static) polymorphism is achieved via method overloading and operator overloading',
+            'Runtime (dynamic) polymorphism is achieved via method overriding using virtual methods or dynamic dispatch',
+            'Interfaces and abstract classes define dynamic contracts without tying callers to concrete implementations'
+        ],
+        'commonMisconceptions': [
+            'Believing runtime polymorphism can be resolved at compile time by the compiler',
+            'Thinking static methods or private methods can be overridden polymorphically in child classes',
+            'Confusing interface implementation with abstract class inheritance'
+        ]
+    },
+    'oop-encapsulation-abstraction': {
+        'topicId': 'oop-encapsulation-abstraction',
+        'topicName': 'OOP - Encapsulation & Abstraction',
+        'keyConcepts': [
+            'Encapsulation bundles data and methods into a class while restricting direct access using access modifiers',
+            'Abstraction hides background implementation details and reveals only essential interfaces',
+            'Encapsulation protects object internal state integrity through data hiding and invariant validation',
+            'Abstraction reduces cognitive complexity by exposing high-level contracts'
+        ],
+        'commonMisconceptions': [
+            'Thinking Encapsulation and Abstraction are the exact same concept',
+            'Assuming encapsulation is just making all class fields private with getters and setters without validation',
+            'Believing abstraction can only be achieved through interfaces'
+        ]
+    },
+    'dbms-normalization': {
+        'topicId': 'dbms-normalization',
+        'topicName': 'DBMS - Normalization',
+        'keyConcepts': [
+            'Normalization structures relational database tables to reduce data redundancy and eliminate anomalies',
+            '1NF requires atomic values and unique tuple identification',
+            '2NF requires 1NF and no partial key dependencies',
+            '3NF requires 2NF and no transitive dependencies',
+            'Denormalization is intentionally used in read-heavy analytics/OLAP systems to improve query speed'
+        ],
+        'commonMisconceptions': [
+            'Believing higher normal forms (e.g. 3NF or BCNF) always guarantee faster SQL query execution',
+            'Thinking primary keys must always be single auto-incrementing integers rather than composite or natural keys',
+            'Confusing 2NF (eliminating partial key dependence) with 3NF (eliminating transitive non-key dependence)'
+        ]
+    },
+    'dbms-transactions-acid': {
+        'topicId': 'dbms-transactions-acid',
+        'topicName': 'DBMS - Transactions & ACID Properties',
+        'keyConcepts': [
+            'Atomicity ensures all operations in a database transaction complete successfully, or all are rolled back',
+            'Consistency ensures a transaction transitions the database from one valid state to another',
+            'Isolation controls how concurrent transactions interact',
+            'Durability guarantees committed transaction changes persist permanently',
+            'Read phenomena: Dirty Read, Non-Repeatable Read, and Phantom Read depend on configured isolation level'
+        ],
+        'commonMisconceptions': [
+            'Assuming Repeatable Read isolation level prevents Phantom Reads in standard relational databases',
+            'Believing Atomicity means concurrent transactions cannot see intermediate changes (that is Isolation)',
+            'Thinking database backups provide Durability without write-ahead logging (WAL) or persistent disk sync'
+        ]
+    },
+    'dbms-indexing-b-trees': {
+        'topicId': 'dbms-indexing-b-trees',
+        'topicName': 'DBMS - Database Indexing & B-Trees',
+        'keyConcepts': [
+            'Database indexes use B-Tree / B+Tree structures to reduce search time complexity from O(N) to O(log N)',
+            'Clustered Index determines physical storage order of data rows on disk (only 1 per table)',
+            'Non-Clustered Index maintains a separate structure pointing back to data row pointers',
+            'Composite indexes require adherence to Leftmost Prefix Rule',
+            'Indexing accelerates READ queries but adds overhead to INSERT, UPDATE, and DELETE operations'
+        ],
+        'commonMisconceptions': [
+            'Believing adding indexes to every column will make all SQL queries faster',
+            'Thinking a table can have multiple Clustered Indexes',
+            'Assuming a query with WHERE age = 25 AND city = "NYC" can use a composite index on (city, age) if queried in reverse order without optimizer intelligence'
+        ]
+    },
+    'ds-arrays-linkedlists': {
+        'topicId': 'ds-arrays-linkedlists',
+        'topicName': 'Data Structures - Arrays vs Linked Lists',
+        'keyConcepts': [
+            'Arrays store elements in contiguous memory blocks, enabling O(1) random access by index',
+            'Linked Lists store nodes with data and pointers scattered in memory, requiring O(N) sequential traversal',
+            'Inserting or deleting at the beginning or middle of an Array requires O(N) shifting of elements',
+            'Singly and Doubly Linked Lists support O(1) insertion/deletion at a known node pointer',
+            'Arrays benefit heavily from CPU cache locality; Linked Lists suffer from cache misses'
+        ],
+        'commonMisconceptions': [
+            'Thinking searching for a value in an unsorted Array is O(1) time',
+            'Believing Linked List insertion at an arbitrary position is O(1) without accounting for O(N) traversal time',
+            'Assuming Linked Lists use less memory than Arrays'
+        ]
+    },
+    'ds-hash-tables': {
+        'topicId': 'ds-hash-tables',
+        'topicName': 'Data Structures - Hash Tables & Collision Resolution',
+        'keyConcepts': [
+            'Hash Tables map key-value pairs using a hash function for expected O(1) lookup, insertion, and deletion',
+            'Collision resolution techniques: Separate Chaining and Open Addressing',
+            'Hash functions must distribute keys uniformly to avoid clustering',
+            'Load factor triggers table resizing (rehashing) when exceeded',
+            'Worst-case lookup degrades to O(N) when all keys hash to the same bucket'
+        ],
+        'commonMisconceptions': [
+            'Believing Hash Table lookups are strictly O(1) in the worst-case scenario',
+            'Thinking Open Addressing dynamically grows bucket lists like Separate Chaining',
+            'Assuming Hash Tables maintain element insertion order by default'
+        ]
+    },
+    'ds-trees-bst': {
+        'topicId': 'ds-trees-bst',
+        'topicName': 'Data Structures - Binary Trees & BST Traversal',
+        'keyConcepts': [
+            'BST property: left child values < root value < right child values',
+            'BST operations (search, insert, delete) run in O(H) time where H is tree height',
+            'Unbalanced BST degrades to O(N) worst-case time complexity',
+            'Self-balancing BSTs (AVL, Red-Black Trees) guarantee O(log N) operations',
+            'In-Order traversal (Left-Root-Right) yields sorted values in BST'
+        ],
+        'commonMisconceptions': [
+            'Assuming searching a Binary Search Tree is always O(log N) without height balance guarantees',
+            'Confusing Binary Trees with Binary Search Trees',
+            'Thinking In-Order traversal yields sorted values for any binary tree, not just BSTs'
+        ]
+    },
+    'sysdesign-caching': {
+        'topicId': 'sysdesign-caching',
+        'topicName': 'System Design - Caching Strategies & Eviction Policies',
+        'keyConcepts': [
+            'Caching stores frequently accessed data in fast RAM memory',
+            'Caching Strategies: Cache-Aside, Write-Through, Write-Around, Write-Back',
+            'Cache Eviction Policies: LRU, LFU, FIFO, TTL',
+            'Cache invalidation challenges: Cache Stampede, Cache Penetration, Cache Breakdown'
+        ],
+        'commonMisconceptions': [
+            'Believing Write-Back caching guarantees immediate data durability during sudden system crashes',
+            'Thinking Redis is purely an in-memory key-value store without persistence options',
+            'Assuming Cache-Aside automatically keeps database and cache in lockstep sync'
+        ]
+    },
+    'sysdesign-load-balancing': {
+        'topicId': 'sysdesign-load-balancing',
+        'topicName': 'System Design - Load Balancing & Scalability',
+        'keyConcepts': [
+            'Load balancers distribute incoming network traffic across backend servers',
+            'Layer 4 vs Layer 7 load balancing',
+            'Load balancing algorithms: Round Robin, Least Connections, Consistent Hashing',
+            'Horizontal Scaling vs Vertical Scaling'
+        ],
+        'commonMisconceptions': [
+            'Believing load balancing alone prevents database bottlenecks',
+            'Confusing Layer 4 routing with Layer 7 routing',
+            'Assuming Round Robin algorithm handles servers with unequal compute hardware effectively'
+        ]
+    },
+    'sysdesign-cap-theorem': {
+        'topicId': 'sysdesign-cap-theorem',
+        'topicName': 'System Design - CAP Theorem & Distributed Consistency',
+        'keyConcepts': [
+            'CAP Theorem: Consistency, Availability, Partition Tolerance (max 2 at once)',
+            'Partition Tolerance (P) is mandatory in distributed networks',
+            'CP Systems vs AP Systems',
+            'PACELC Theorem extends CAP by adding Latency vs Consistency trade-offs'
+        ],
+        'commonMisconceptions': [
+            'Believing a database can pick C and A and completely drop P in a distributed network',
+            'Thinking Eventual Consistency implies data may remain inconsistent forever',
+            'Confusing CAP Consistency with ACID Consistency'
+        ]
+    },
+    'qa-stlc-test-pyramid': {
+        'topicId': 'qa-stlc-test-pyramid',
+        'topicName': 'QA - Software Testing Life Cycle & Test Pyramid',
+        'keyConcepts': [
+            'STLC phases: Requirement Analysis, Test Planning, Test Execution, Closure',
+            'Test Pyramid: Unit Tests (base), Integration Tests (middle), E2E UI Tests (top apex)',
+            'Verification vs Validation',
+            'Shift-Left Testing'
+        ],
+        'commonMisconceptions': [
+            'Thinking STLC only begins after software coding is 100% complete',
+            'Inverting the Test Pyramid by having 80% E2E UI automation tests',
+            'Confusing Severity with Priority'
+        ]
+    },
+    'qa-bva-equivalence': {
+        'topicId': 'qa-bva-equivalence',
+        'topicName': 'QA - Boundary Value Analysis & Equivalence Partitioning',
+        'keyConcepts': [
+            'Equivalence Partitioning (EP) divides input data into valid and invalid partitions',
+            'Boundary Value Analysis (BVA) tests boundary values between partitions',
+            'Defects occur disproportionately at boundary limits',
+            'Positive vs Negative testing'
+        ],
+        'commonMisconceptions': [
+            'Thinking testing every single integer value in a range is necessary instead of partitioning',
+            'Believing Boundary Value Analysis is only applicable to numeric fields',
+            'Confusing boundary values with internal array index pointers'
+        ]
+    },
+    'qa-selenium-pom': {
+        'topicId': 'qa-selenium-pom',
+        'topicName': 'QA - Test Automation Frameworks & Page Object Model',
+        'keyConcepts': [
+            'Page Object Model (POM) creates an object repository for web page UI elements',
+            'Separates UI element locators from test assertions',
+            'Explicit Waits are preferred over Thread.sleep()',
+            'Data-Driven Testing framework'
+        ],
+        'commonMisconceptions': [
+            'Placing test assertions directly inside Page Object classes',
+            'Using hardcoded Thread.sleep() calls to resolve async element loading',
+            'Believing absolute XPath is resilient to UI updates'
+        ]
+    },
+    'ds-sql-aggregations-joins': {
+        'topicId': 'ds-sql-aggregations-joins',
+        'topicName': 'SQL - Joins, Aggregations & Window Functions',
+        'keyConcepts': [
+            'SQL Joins: INNER, LEFT, RIGHT, FULL, CROSS',
+            'GROUP BY vs HAVING vs WHERE',
+            'Window Functions: ROW_NUMBER(), RANK(), DENSE_RANK()',
+            'Subqueries vs CTEs'
+        ],
+        'commonMisconceptions': [
+            'Using aggregate functions in a WHERE clause instead of a HAVING clause',
+            'Confusing ROW_NUMBER() with RANK() and DENSE_RANK()',
+            'Thinking LEFT JOIN excludes unmatched right table rows when filtering in WHERE'
+        ]
+    },
+    'ds-stats-hypothesis-testing': {
+        'topicId': 'ds-stats-hypothesis-testing',
+        'topicName': 'Statistics - Hypothesis Testing & P-Values',
+        'keyConcepts': [
+            'Null Hypothesis (H0) vs Alternative Hypothesis (H1)',
+            'P-value is probability of obtaining results at least as extreme assuming H0 is true',
+            'Type I Error (Alpha, false positive) vs Type II Error (Beta, false negative)',
+            'Statistical Power (1 - Beta)'
+        ],
+        'commonMisconceptions': [
+            'Believing p-value is the probability that the Null Hypothesis is true',
+            'Confusing statistical significance with practical effect size',
+            'Assuming failing to reject H0 proves H0 is true'
+        ]
+    },
+    'ds-ml-bias-variance': {
+        'topicId': 'ds-ml-bias-variance',
+        'topicName': 'ML - Overfitting, Bias-Variance Tradeoff & Regularization',
+        'keyConcepts': [
+            'Bias Error (underfitting) vs Variance Error (overfitting)',
+            'L1 (Lasso) and L2 (Ridge) regularization',
+            'Cross-validation (k-fold CV)'
+        ],
+        'commonMisconceptions': [
+            'Believing high training accuracy automatically means a great production model',
+            'Thinking L1 and L2 regularization decrease model bias',
+            'Confusing Underfitting with Overfitting'
+        ]
+    },
+    'ds-ml-evaluation-metrics': {
+        'topicId': 'ds-ml-evaluation-metrics',
+        'topicName': 'ML - Classification Evaluation Metrics',
+        'keyConcepts': [
+            'Confusion Matrix: TP, TN, FP, FN',
+            'Accuracy, Precision, Recall, F1-Score, ROC-AUC'
+        ],
+        'commonMisconceptions': [
+            'Using Accuracy to evaluate models on severely imbalanced datasets',
+            'Thinking Precision and Recall can both be maximized simultaneously without trade-offs',
+            'Confusing Precision with Recall'
+        ]
+    },
+    'behavioral-handling-conflict': {
+        'topicId': 'behavioral-handling-conflict',
+        'topicName': 'Behavioral - Handling Team Conflict & Technical Disagreements',
+        'keyConcepts': [
+            'Focusing on objective data, benchmarks, and customer impact',
+            'Actively listening to peer perspectives',
+            'Disagree and Commit principle',
+            'De-escalating tension through 1-on-1 dialogue or PoCs',
+            'STAR method structure'
+        ],
+        'commonMisconceptions': [
+            'Claiming you have never had a conflict or disagreement with a teammate',
+            'Describing a situation where you simply surrendered your position without technical justification',
+            'Blaming the other person or framing conflict as a personal argument'
+        ]
+    },
+    'behavioral-ownership-failure': {
+        'topicId': 'behavioral-ownership-failure',
+        'topicName': 'Behavioral - Ownership & Taking Accountability for Failure',
+        'keyConcepts': [
+            'Taking responsibility without deflecting blame',
+            'Conducting blameless root-cause analysis (5 Whys)',
+            'Proactively implementing long-term safeguards',
+            'Transparent communication with stakeholders',
+            'Demonstrating lessons learned'
+        ],
+        'commonMisconceptions': [
+            'Downplaying the severity of the mistake or deflecting blame onto vague requirements',
+            'Focusing 90% of response on the failure and 10% on action/learnings',
+            'Thinking ownership means resolving issues in isolation without notifying the team'
+        ]
+    },
+    'behavioral-ambiguity-adaptability': {
+        'topicId': 'behavioral-ambiguity-adaptability',
+        'topicName': 'Behavioral - Navigating Ambiguity & Rapid Adaptability',
+        'keyConcepts': [
+            'Breaking down vague problems into actionable sub-problems',
+            'Formulating and validating reasonable assumptions',
+            'Delivering MVP iterations quickly',
+            'Resilience and composure under shifting priorities'
+        ],
+        'commonMisconceptions': [
+            'Waiting passively for explicit step-by-step instructions',
+            'Expressing frustration about shifting requirements',
+            'Making unverified assumptions without validating'
+        ]
+    },
+    'behavioral-prioritization': {
+        'topicId': 'behavioral-prioritization',
+        'topicName': 'Behavioral - Managing Competing Priorities & Deadlines',
+        'keyConcepts': [
+            'Evaluating urgency vs impact (Eisenhower Matrix / RICE)',
+            'Communicating early and transparently when deadlines are at risk',
+            'Negotiating scope reductions rather than sacrificing quality'
+        ],
+        'commonMisconceptions': [
+            'Saying yes to every request leading to burnout and buggy code',
+            'Silently missing deadlines without alerting stakeholders',
+            'Arbitrarily dropping tasks without aligning with leads'
+        ]
+    },
+    'devops-cicd-iac': {
+        'topicId': 'devops-cicd-iac',
+        'topicName': 'DevOps - CI/CD Pipelines & Infrastructure as Code',
+        'keyConcepts': [
+            'Continuous Integration (CI) and Continuous Deployment (CD)',
+            'Infrastructure as Code (IaC) with Terraform/CloudFormation',
+            'Blue/Green deployment, Canary releases',
+            'Idempotency in IaC'
+        ],
+        'commonMisconceptions': [
+            'Thinking CI/CD means pushing untested code straight to production',
+            'Manually modifying cloud resources via UI while using Terraform',
+            'Confusing Continuous Delivery with Continuous Deployment'
+        ]
+    },
+    'cybersecurity-owasp-auth': {
+        'topicId': 'cybersecurity-owasp-auth',
+        'topicName': 'Cybersecurity - OWASP Top 10 & AuthN vs AuthZ',
+        'keyConcepts': [
+            'Authentication (AuthN) vs Authorization (AuthZ)',
+            'OWASP Top 10 vulnerabilities (SQLi, XSS, Broken Access Control)',
+            'Preventing SQLi via parameterized queries / prepared statements',
+            'Preventing XSS via output encoding and CSP',
+            'Principle of Least Privilege'
+        ],
+        'commonMisconceptions': [
+            'Confusing Authentication with Authorization',
+            'Believing regex sanitization completely eliminates SQL Injection without prepared statements',
+            'Thinking MD5/SHA-256 password hashing without salt/bcrypt is secure'
+        ]
+    }
+}
+
+@app.route('/api/evaluate-answer', methods=['POST', 'OPTIONS'])
+def evaluate_answer():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    session_id = data.get('sessionId', '')
+    last_question = data.get('lastQuestionAsked') or data.get('question') or data.get('lastQuestion') or 'Technical interview question'
+    student_answer = data.get('studentAnswer') or data.get('transcript') or data.get('answer') or ''
+    current_topic_id = data.get('currentTopicId') or data.get('topicId') or 'oop-inheritance'
+    rubric_override = data.get('rubric')
+    session_override = data.get('sessionState')
+
+    # 1. Fetch Rubric for currentTopicId
+    if rubric_override and isinstance(rubric_override, dict):
+        rubric = rubric_override
+    else:
+        rubric = RUBRIC_DATABASE.get(current_topic_id, RUBRIC_DATABASE['oop-inheritance'])
+
+    topic_name = rubric.get('topicName', 'Technical Concept')
+    key_concepts = rubric.get('keyConcepts', [])
+    common_misconceptions = rubric.get('commonMisconceptions', [])
+
+    # 2. Extract recent state context
+    history_summary = ""
+    recent_turns_str = ""
+    if session_override and isinstance(session_override, dict):
+        history_summary = session_override.get('historySummary', '')
+        turns = session_override.get('recentTurns', [])
+        recent_turns_str = "\n".join([f"{t.get('role', '').capitalize()}: \"{t.get('text', '')}\"" for t in turns[-6:]]) if turns else ""
+
+    ans_clean = student_answer.strip().lower()
+
+    # Pre-check A: "don't know" phrases
+    if any(p in ans_clean for p in ["don't know", "dont know", "not sure", "no idea", "idk", "have no clue"]):
+        return jsonify({
+            "verdict": "dont_know",
+            "conceptsCorrect": [],
+            "conceptsWrong": [],
+            "conceptsMissing": key_concepts,
+            "confidenceOfStudent": "low",
+            "followUpWorthy": True,
+            "reason": f"Candidate explicitly indicated lack of knowledge or uncertainty on {topic_name}."
+        })
+
+    # Pre-check B: Empty / extremely short response
+    if len(ans_clean) < 4:
+        return jsonify({
+            "verdict": "vague",
+            "conceptsCorrect": [],
+            "conceptsWrong": [],
+            "conceptsMissing": key_concepts,
+            "confidenceOfStudent": "low",
+            "followUpWorthy": True,
+            "reason": "Candidate response was empty or too brief to evaluate against reference rubric concepts."
+        })
+
+    # Build Grounded Grader Prompt for Gemini
+    kc_formatted = "\n".join([f"- {kc}" for kc in key_concepts]) if key_concepts else "- Core topic fundamentals"
+    cm_formatted = "\n".join([f"- {cm}" for cm in common_misconceptions]) if common_misconceptions else "- None defined"
+
+    prompt = f"""You are a strict, objective, structured Answer Evaluator for technical & behavioral interviews.
+Your ONLY job is to judge the candidate's answer against the reference rubric below.
+Do NOT act as an interviewer. Do NOT generate the next question.
+
+QUESTION ASKED: "{last_question}"
+STUDENT ANSWER: "{student_answer}"
+
+REFERENCE GROUND TRUTH RUBRIC ({topic_name}):
+=== KEY CONCEPTS TO CHECK FOR ===
+{kc_formatted}
+
+=== COMMON MISCONCEPTIONS TO WATCH FOR (PENALIZE IF PRESENT) ===
+{cm_formatted}
+
+CONTEXT FROM SESSION:
+- History Summary: {history_summary or 'None'}
+- Recent Turns: {recent_turns_str or 'None'}
+
+CRITICAL GRADING RULES:
+1. Check the student's answer against these key concepts: {key_concepts}.
+2. Check specifically for these common misconceptions: {common_misconceptions}.
+3. Do NOT judge correctness from general knowledge alone — use this rubric as the primary reference.
+4. If the student confused a key concept with a common misconception (e.g. confusing overriding with overloading, or thinking private members are inherited), set verdict to "incorrect" or "partially_correct" and explicitly flag the misconception in conceptsWrong.
+5. Determine verdict strictly from: "correct" | "partially_correct" | "incorrect" | "vague" | "off_topic" | "dont_know".
+6. Determine confidenceOfStudent strictly from: "low" | "medium" | "high".
+7. Set followUpWorthy to true if verdict is "partially_correct", "incorrect", "vague", or "dont_know", or if conceptsMissing is non-empty.
+8. Provide a brief 1-2 sentence reason citing the specific rubric concepts.
+
+Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT structure:
+{{
+  "verdict": "incorrect",
+  "conceptsCorrect": ["Concept correctly explained"],
+  "conceptsWrong": ["Specific misconception triggered from rubric"],
+  "conceptsMissing": ["Key concept omitted"],
+  "confidenceOfStudent": "medium",
+  "followUpWorthy": true,
+  "reason": "Brief internal justification referencing the specific rubric concepts."
+}}
+"""
+
+    eval_result = None
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            eval_result = json.loads(cleaned_text)
+        except Exception as e:
+            print(f"Gemini API Exception in evaluate_answer: {e}")
+
+    if not eval_result or not isinstance(eval_result, dict) or 'verdict' not in eval_result:
+        # Grounded deterministic fallback evaluation
+        has_misconception = any(
+            any(w in ans_clean for w in m.lower().split() if len(w) > 5)
+            for m in common_misconceptions
+        )
+        has_key_concept = any(
+            any(w in ans_clean for w in k.lower().split() if len(w) > 5)
+            for k in key_concepts
+        )
+
+        if has_misconception and not has_key_concept:
+            v = "incorrect"
+            c_wrong = [common_misconceptions[0]] if common_misconceptions else ["Triggered common topic misconception"]
+            c_corr = []
+        elif has_misconception and has_key_concept:
+            v = "partially_correct"
+            c_wrong = [common_misconceptions[0]] if common_misconceptions else ["Mixed correct concepts with misconception"]
+            c_corr = [key_concepts[0]] if key_concepts else ["Basic concept mention"]
+        elif has_key_concept:
+            v = "correct"
+            c_wrong = []
+            c_corr = key_concepts[:2] if key_concepts else ["Demonstrated core concepts"]
+        else:
+            v = "vague"
+            c_wrong = []
+            c_corr = []
+
+        eval_result = {
+            "verdict": v,
+            "conceptsCorrect": c_corr,
+            "conceptsWrong": c_wrong,
+            "conceptsMissing": [k for k in key_concepts if k not in c_corr],
+            "confidenceOfStudent": "medium" if v in ["correct", "partially_correct"] else "low",
+            "followUpWorthy": v != "correct",
+            "reason": f"Grounded check against {topic_name} rubric: verdict evaluated as {v}."
+        }
+
+    return jsonify(eval_result)
+
+
+def check_navigation_intent(student_answer: str) -> dict:
+    if not student_answer or not isinstance(student_answer, str):
+        return None
+    ans = student_answer.strip().lower()
+
+    repeat_phrases = [
+        'repeat the question',
+        'repeat question',
+        'can you repeat',
+        'please repeat',
+        'say that again',
+        'pardon',
+        "didn't hear you",
+        "didnt hear",
+        'what was the question',
+        'could you repeat'
+    ]
+    if any(p in ans for p in repeat_phrases):
+        return {
+            'strategy': 'repeat_question',
+            'topicAdvance': False,
+            'newDifficultyLevel': None,
+            'isNavigation': True
+        }
+
+    simplify_phrases = [
+        'simplify the question',
+        'simplify question',
+        'can you simplify',
+        'make it simpler',
+        'explain in simpler terms',
+        'make it easier',
+        'too complicated',
+        'rephrase question',
+        'rephrase'
+    ]
+    if any(p in ans for p in simplify_phrases):
+        return {
+            'strategy': 'simplify_question',
+            'topicAdvance': False,
+            'newDifficultyLevel': None,
+            'isNavigation': True
+        }
+
+    return None
+
+
+def evaluate_decision_engine(evaluator_output: dict, session_state: dict, student_answer: str = "") -> dict:
+    """
+    Pure, rule-based Decision Engine (Prompt 4).
+    Maps Evaluator outputs & session state to strategy.
+    """
+    nav_intent = check_navigation_intent(student_answer)
+    if nav_intent:
+        return nav_intent
+
+    current_depth = session_state.get('currentDepth', 0) if isinstance(session_state, dict) else 0
+    current_diff = (session_state.get('difficultyLevel', 'medium') if isinstance(session_state, dict) else 'medium').lower()
+    
+    verdict = (evaluator_output.get('verdict', 'partially_correct') if isinstance(evaluator_output, dict) else 'partially_correct').lower()
+    confidence = (evaluator_output.get('confidenceOfStudent', 'medium') if isinstance(evaluator_output, dict) else 'medium').lower()
+    concepts_missing = evaluator_output.get('conceptsMissing', []) if isinstance(evaluator_output, dict) else []
+
+    # 1. HARD RULE: Cap cross-questioning at 3 turns per topic
+    if current_depth >= 3:
+        return {
+            'strategy': 'move_to_next_topic',
+            'topicAdvance': True,
+            'newDifficultyLevel': None
+        }
+
+    # 2. CONSECUTIVE WEAK VERDICTS RULE (2 consecutive "incorrect" or "dont_know" on same topic)
+    eval_log = session_state.get('evaluationLog', []) if isinstance(session_state, dict) else []
+    if len(eval_log) >= 1:
+        last_turn_eval = eval_log[-1] if isinstance(eval_log[-1], dict) else {}
+        last_verdict = last_turn_eval.get('verdict', '').lower()
+        if verdict in ['incorrect', 'dont_know'] and last_verdict in ['incorrect', 'dont_know']:
+            lower_diff = 'medium' if current_diff == 'hard' else 'easy'
+            return {
+                'strategy': 'drop_difficulty_offer_easier_related',
+                'topicAdvance': True,
+                'newDifficultyLevel': lower_diff
+            }
+
+    # 3. STRATEGY TABLE RULES
+    if verdict == 'correct' and confidence == 'high':
+        if len(concepts_missing) > 0:
+            return {
+                'strategy': 'probe_missing_nuance',
+                'topicAdvance': False,
+                'newDifficultyLevel': None
+            }
+        next_diff = 'hard' if current_diff == 'medium' else None
+        return {
+            'strategy': 'increase_difficulty_or_new_topic',
+            'topicAdvance': current_depth >= 1,
+            'newDifficultyLevel': next_diff
+        }
+
+    if verdict == 'correct':
+        if len(concepts_missing) > 0:
+            return {
+                'strategy': 'probe_missing_nuance',
+                'topicAdvance': False,
+                'newDifficultyLevel': None
+            }
+        return {
+            'strategy': 'increase_difficulty_or_new_topic',
+            'topicAdvance': current_depth >= 1,
+            'newDifficultyLevel': None
+        }
+
+    if verdict == 'partially_correct':
+        return {
+            'strategy': 'affirm_correct_part_and_crossquestion_wrong_part',
+            'topicAdvance': False,
+            'newDifficultyLevel': None
+        }
+
+    if verdict == 'incorrect':
+        if current_depth <= 1:
+            return {
+                'strategy': 'guiding_question_no_reveal',
+                'topicAdvance': False,
+                'newDifficultyLevel': None
+            }
+        else:
+            return {
+                'strategy': 'gentle_correct_then_retest',
+                'topicAdvance': False,
+                'newDifficultyLevel': None
+            }
+
+    if verdict in ['vague', 'off_topic']:
+        return {
+            'strategy': 'ask_narrower_version',
+            'topicAdvance': False,
+            'newDifficultyLevel': None
+        }
+
+    if verdict == 'dont_know':
+        return {
+            'strategy': 'simplify_or_hint',
+            'topicAdvance': False,
+            'newDifficultyLevel': None
+        }
+
+    return {
+        'strategy': 'affirm_correct_part_and_crossquestion_wrong_part',
+        'topicAdvance': False,
+        'newDifficultyLevel': None
+    }
+
+
+@app.route('/api/decide-next-step', methods=['POST', 'OPTIONS'])
+def decide_next_step():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    evaluator_output = data.get('evaluatorOutput', {})
+    session_state = data.get('sessionState', {})
+    student_answer = data.get('studentAnswer', '') or data.get('transcript', '')
+
+    decision = evaluate_decision_engine(evaluator_output, session_state, student_answer)
+    return jsonify(decision)
+@app.route('/api/generate-question', methods=['POST', 'OPTIONS'])
+def generate_question():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    session_id = data.get('sessionId', '')
+    strategy = data.get('strategy', 'affirm_correct_part_and_crossquestion_wrong_part')
+    evaluator_output = data.get('evaluatorOutput', {})
+    current_topic_id = data.get('currentTopicId', 'oop-inheritance')
+    rubric_override = data.get('rubric', {})
+    session_override = data.get('sessionState', {})
+    is_opening = data.get('isOpening', False)
+
+    # Resolve Rubric & Topic Name
+    if rubric_override and isinstance(rubric_override, dict):
+        rubric = rubric_override
+    else:
+        rubric = RUBRIC_DATABASE.get(current_topic_id, RUBRIC_DATABASE.get('oop-inheritance', {}))
+
+    topic_name = rubric.get('topicName', 'Technical Concept')
+
+    # Resolve Session Context
+    company_name = session_override.get('selectedCompany', 'Google') if isinstance(session_override, dict) else 'Google'
+    target_field = session_override.get('selectedField', 'Software Development') if isinstance(session_override, dict) else 'Software Development'
+    round_type = session_override.get('roundType', 'technical') if isinstance(session_override, dict) else 'technical'
+    history_summary = session_override.get('historySummary', '') if isinstance(session_override, dict) else ''
+    recent_turns = session_override.get('recentTurns', []) if isinstance(session_override, dict) else []
+
+    recent_formatted = "\n".join([f"{t.get('role', '').capitalize()}: \"{t.get('text', '')}\"" for t in recent_turns[-6:]]) if recent_turns else "None"
+
+    concepts_correct = evaluator_output.get('conceptsCorrect', [])
+    concepts_wrong = evaluator_output.get('conceptsWrong', [])
+    concepts_missing = evaluator_output.get('conceptsMissing', [])
+    eval_reason = evaluator_output.get('reason', '')
+
+    # Special opening question generation
+    if is_opening:
+        sample_q = rubric.get('sampleQuestion', f"Tell me about your experience with {topic_name}.")
+        return jsonify({
+            "interviewerResponse": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}"
+        })
+
+    prompt = f"""You are an experienced, human-like, engaging technical & behavioral interviewer at {company_name} conducting a {round_type.upper()} interview for the {target_field} role.
+Your task for this turn is FIXED by the interview decision engine: {strategy}.
+
+EVALUATION SUMMARY OF CANDIDATE'S LAST RESPONSE:
+- What the student got right: {", ".join(concepts_correct) if concepts_correct else 'None'}
+- What the student got wrong or exhibited misconceptions on: {", ".join(concepts_wrong) if concepts_wrong else 'None'}
+- What the student missed: {", ".join(concepts_missing) if concepts_missing else 'None'}
+- Evaluator Reason: {eval_reason or 'None'}
+
+ACTIVE TOPIC: {topic_name}
+CONVERSATION HISTORY SUMMARY: {history_summary or 'None'}
+RECENT TURNS:
+{recent_formatted}
+
+GENERATION INSTRUCTIONS FOR THIS TURN:
+Ask ONE natural, conversational turn that:
+1. Directly references what the student just said — never ignore their actual response.
+2. If strategy is "repeat_question": politely restate or clarify the previous question.
+3. If strategy is "simplify_question": ask a simplified, breakdown version of the previous question.
+4. If strategy involves not revealing the answer yet (e.g. "guiding_question_no_reveal"): ask a guiding question that lets the candidate self-correct without giving away the answer directly.
+5. If strategy is to affirm and cross-question (e.g. "affirm_correct_part_and_crossquestion_wrong_part"): briefly acknowledge what they got right before probing the misconception or missing gap.
+6. If strategy is to move to a new topic (e.g. "increase_difficulty_or_new_topic" or "move_to_next_topic"): transition naturally to the new topic ({topic_name}) rather than abruptly.
+7. If strategy is "simplify_or_hint": provide a gentle hint or simplify the question to help them get started.
+8. Keep it to 1-2 concise, spoken sentences. Speak like a real interviewer, not a quiz reading out loud.
+
+Return ONLY valid raw JSON with NO code blocks:
+{{
+  "interviewerResponse": "Spoken interviewer response here..."
+}}
+"""
+
+    gen_resp = None
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            gen_resp = json.loads(cleaned_text)
+        except Exception as e:
+            print(f"Gemini API Exception in generate_question: {e}")
+
+    if not gen_resp or not isinstance(gen_resp, dict) or 'interviewerResponse' not in gen_resp:
+        if strategy == 'repeat_question':
+            resp = "Could you please elaborate on your previous answer? I'd love to hear your thoughts again."
+        elif strategy == 'simplify_question':
+            resp = f"Let's simplify that: in plain terms, how would you explain the core idea of {topic_name}?"
+        elif strategy == 'guiding_question_no_reveal':
+            resp = f"That's an interesting perspective. Think carefully about how {topic_name} handles edge cases—can you reconsider your assumption?"
+        elif strategy in ['increase_difficulty_or_new_topic', 'move_to_next_topic']:
+            resp = f"Great work on that! Now, let's transition to our next key area: {topic_name}. How would you approach it?"
+        elif strategy == 'simplify_or_hint':
+            resp = f"No worries at all! Here's a quick hint regarding {topic_name}: consider how data flows between components. What comes to mind now?"
+        else:
+            resp = f"Good point on the initial concept! Building on that, how would you address the missing nuance in {topic_name}?"
+
+        gen_resp = {
+            "interviewerResponse": resp
+        }
+
+    return jsonify(gen_resp)
+
+
+@app.route('/api/interview-session-turn', methods=['POST', 'OPTIONS'])
+def interview_session_turn():
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json() or {}
+    session = data.get('sessionState', {})
+    question = data.get('question', '')
+    student_answer = data.get('studentAnswer', '') or data.get('transcript', '')
+    rubric = data.get('rubric', {})
+
+    current_topic_id = session.get('currentTopicId', 'oop-inheritance') if isinstance(session, dict) else 'oop-inheritance'
+
+    # Step 1: Evaluator (Prompt 3)
+    eval_payload = {
+        "sessionId": session.get('sessionId', ''),
+        "lastQuestionAsked": question,
+        "studentAnswer": student_answer,
+        "currentTopicId": current_topic_id,
+        "rubric": rubric,
+        "sessionState": session
+    }
+    with app.test_request_context('/api/evaluate-answer', json=eval_payload):
+        eval_resp_obj = evaluate_answer()
+        evaluator_output = eval_resp_obj.get_json() if hasattr(eval_resp_obj, 'get_json') else {}
+
+    # Step 2: Decision Engine (Prompt 4)
+    decision_output = evaluate_decision_engine(evaluator_output, session, student_answer)
+
+    # Step 3: Question Generator (Prompt 5)
+    gen_payload = {
+        "sessionId": session.get('sessionId', ''),
+        "strategy": decision_output.get('strategy'),
+        "evaluatorOutput": evaluator_output,
+        "currentTopicId": current_topic_id,
+        "rubric": rubric,
+        "sessionState": session
+    }
+    with app.test_request_context('/api/generate-question', json=gen_payload):
+        gen_resp_obj = generate_question()
+        generator_output = gen_resp_obj.get_json() if hasattr(gen_resp_obj, 'get_json') else {}
+
+    interviewer_text = generator_output.get('interviewerResponse', 'Thank you. Let us continue.')
+
+    return jsonify({
+        "evaluatorOutput": evaluator_output,
+        "decisionOutput": decision_output,
+        "interviewerResponse": interviewer_text,
+        "nextQuestion": interviewer_text,
+        "questionText": interviewer_text
+    })
+
+
 
 
 JUDGE0_LANGUAGE_IDS = {
@@ -1323,7 +2177,49 @@ The candidate just expressed that they don't know or are unsure about the questi
 3. Do NOT praise them for saying they don't know, but maintain a natural, supportive, inquiring interviewer tone.
 """
 
+    # Round-specific instructions for Technical vs HR interview flows
+    if interview_type == 'technical':
+        round_specific_instructions = f"""
+TECHNICAL INTERVIEW EVALUATION & QUESTION GENERATION GUIDELINES:
+1. READ AND COMPREHEND THE FULL ANSWER HOLISTICALLY:
+   - Carefully read the candidate's ENTIRE response — analyze their technical reasoning, architectural choices, data structure selections, trade-off awareness, and depth of explanation.
+   - DO NOT extract a single technology keyword or noun (e.g., "React", "Python", "MongoDB", "microservices") and repeatedly drill into just that keyword.
+
+2. INTELLIGENTLY CHOOSE ONE OF THREE ACTIONS:
+   a) ASK A GENUINE FOLLOW-UP ("moveToNewTopic": false): Ask a follow-up ONLY if their answer was vague, incomplete, missed critical system constraints/edge cases, or left key technical trade-offs unexplained.
+   b) MOVE TO A NEW TOPIC ("moveToNewTopic": true): If their answer was clear, sound, and complete, MOVE IMMEDIATELY to a new technical domain (e.g., from Algorithms/Data Structures to Database Indexing, System Architecture, API Security, Concurrency, Error Handling, or Automated Testing).
+   c) PROBE A DIFFERENT TECHNICAL ASPECT ("moveToNewTopic": false): If exploring the same project/topic further, shift to a DIFFERENT technical dimension (e.g., from time complexity to edge cases, memory optimization, failure recovery, or test coverage) — NEVER re-interrogate the same keyword.
+
+3. STRICT NEGATIVE INSTRUCTION (NO KEYWORD FIXATION):
+   - Do NOT fixate on a single word or phrase from the candidate's answer.
+   - Do NOT ask "You mentioned X, tell me more about X" repeatedly. Evaluate their answer holistically to decide what adds the most value to assessing their technical competency.
+
+4. TECHNICAL DEPTH FOCUS:
+   - Focus follow-ups on problem-solving methodology, system trade-offs, edge case handling, and fundamental CS principles — evaluating true engineering depth rather than keyword definitions.
+"""
+    else:
+        round_specific_instructions = f"""
+HR & BEHAVIORAL INTERVIEW EVALUATION & QUESTION GENERATION GUIDELINES:
+1. READ AND COMPREHEND THE FULL ANSWER HOLISTICALLY:
+   - Carefully read the candidate's ENTIRE response — evaluate their interpersonal dynamics, leadership mindset, conflict resolution style, and personal accountability.
+   - DO NOT extract a single company, team, or project keyword (e.g., "my manager", "internship", "college project") and repeatedly drill into just that keyword.
+
+2. INTELLIGENTLY CHOOSE ONE OF THREE ACTIONS:
+   a) ASK A GENUINE FOLLOW-UP ("moveToNewTopic": false): Ask a follow-up ONLY if their answer was vague, lacked key STAR components (Situation, Task, Action, Result), or omitted their specific personal contribution vs. the team's role.
+   b) MOVE TO A NEW TOPIC ("moveToNewTopic": true): If their answer was structured, clear, and complete, MOVE IMMEDIATELY to a new HR competency (e.g., from Workplace Conflict to Handling Feedback, Ownership Under Pressure, Ethical Dilemmas, Career Alignment, or Team Collaboration).
+   c) PROBE A DIFFERENT BEHAVIORAL ASPECT ("moveToNewTopic": false): If exploring the same scenario further, shift to a DIFFERENT behavioral dimension (e.g., from team communication to personal lessons learned or long-term behavioral changes) — NEVER re-interrogate the same keyword.
+
+3. STRICT NEGATIVE INSTRUCTION (NO KEYWORD FIXATION):
+   - Do NOT fixate on a single word, team member, or project name from the candidate's answer.
+   - Do NOT ask "You mentioned X, tell me more about X" repeatedly. Evaluate their answer holistically to decide what adds the most value to assessing their culture fit and behavioral maturity.
+
+4. BEHAVIORAL STAR FOCUS:
+   - Focus follow-ups on personal ownership, conflict resolution tactics, resilience under stress, growth mindset, and tangible results — evaluating how they behave in professional work environments.
+"""
+
     prompt = f"""You are an experienced human interviewer conducting a live {interview_type.upper()} interview for {company_name} for the role of {target_field} ({experience_level} level, {difficulty_level} difficulty). You are not a quiz bot reading questions off a list — you are a real person having a conversation, genuinely listening to what the candidate says, and reacting the way a sharp, experienced interviewer actually would.
+
+{round_specific_instructions}
 
 STRICT QUESTION DEDUPLICATION & NO-REPEAT RULE:
 - Do NOT repeat, rephrase, or ask any question or topic that has ALREADY been asked in this session.
@@ -1335,15 +2231,8 @@ STRICT QUESTION DEDUPLICATION & NO-REPEAT RULE:
   - For HR: switch to a distinct behavioral competency (e.g. conflict resolution, handling feedback, leadership/ownership, prioritizing under pressure, career motivation, ethical dilemmas, teamwork) that has NOT been asked above.
 - Make sure your next question is distinctly different from every question listed in QUESTIONS ALREADY ASKED IN THIS SESSION.
 
-Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said and let that genuinely shape your response:
+Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said as a whole and let that genuinely shape your response.
 
-- If they gave a real answer, don't just praise it and move to a new topic — dig into it a little, the way a curious interviewer naturally does. Ask them why they made a choice, what they'd do differently, poke at an assumption, or ask for a concrete example. Not every single time (that would be exhausting), but often enough that it feels like a real back-and-forth, not a checklist.
-- If they said they don't know something, don't just say 'no worries' and jump to something unrelated — a real interviewer tries to meet them halfway first, simplifies the question, gives a small hint, or asks them to reason it out loud, before deciding to move on.
-- If they gave a vague or surface-level answer, push for specifics the way a real interviewer does — 'can you walk me through that in more detail' or 'what exactly did you mean by that'.
-- If they said something that doesn't actually address what you asked, don't pretend it did — point that out naturally and either rephrase your question or ask them to actually address it.
-- Match your reactions to what was actually said — never respond with praise or enthusiasm to a weak or non-answer, and never respond flatly to a genuinely strong one. Your tone should track the quality of what you just heard, like a real person's would.
-
-You decide, turn by turn, based on the actual content of what the candidate just said, whether to: dig deeper into their last answer, simplify/rephrase because they're struggling, gently challenge something they claimed, or move to a new question because this one has been sufficiently explored. Don't follow a fixed pattern — vary it the way a real interview naturally varies, and let the candidate's actual answers be what drives your decisions, not a script.
 {idk_directive}
 LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
 
@@ -1960,6 +2849,117 @@ def generate_final_report():
         calculated_readiness_score = overall_interview_score
 
 
+    # Extract structured evaluationLog metrics directly from interviewSessions document (Prompt 2)
+    session_state = data.get('sessionState') or data.get('sessionResults') or {}
+    eval_log = session_state.get('evaluationLog', []) if isinstance(session_state, dict) else []
+    topic_plan = session_state.get('topicPlan', []) if isinstance(session_state, dict) else []
+    history_summary = session_state.get('historySummary', '') if isinstance(session_state, dict) else ''
+
+    topic_map = {}
+    for t in topic_plan:
+        tid = t.get('topicId')
+        if tid:
+            topic_map[tid] = {
+                'topicId': tid,
+                'topicName': t.get('topicName', tid),
+                'status': t.get('status', 'not_started'),
+                'masteryScore': t.get('mastery') or 75,
+                'turns': [],
+                'conceptsCovered': set(),
+                'conceptsWrong': set(),
+                'conceptsMissing': set()
+            }
+
+    for entry in eval_log:
+        tid = entry.get('topicId') or session_state.get('currentTopicId', 'general-topic')
+        if tid not in topic_map:
+            topic_map[tid] = {
+                'topicId': tid,
+                'topicName': entry.get('topicName', tid),
+                'status': 'completed',
+                'masteryScore': entry.get('score', 75),
+                'turns': [],
+                'conceptsCovered': set(),
+                'conceptsWrong': set(),
+                'conceptsMissing': set()
+            }
+        t_obj = topic_map[tid]
+        t_obj['turns'].append(entry)
+        for c in (entry.get('conceptsCorrect') or entry.get('keyConceptsCovered') or []):
+            if c: t_obj['conceptsCovered'].add(c)
+        for c in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
+            if c: t_obj['conceptsWrong'].add(c)
+        for c in (entry.get('conceptsMissing') or entry.get('keyConceptGaps') or []):
+            if c: t_obj['conceptsMissing'].add(c)
+
+    topic_mastery = []
+    verdict_counts = {'correct': 0, 'partially_correct': 0, 'incorrect': 0, 'vague': 0, 'off_topic': 0, 'dont_know': 0}
+
+    for tid, t in topic_map.items():
+        turns = t['turns']
+        total_turns = len(turns)
+        successful_turns = 0
+        score_sum = 0
+
+        for turn in turns:
+            v = turn.get('verdict') or ('correct' if turn.get('passed') else 'incorrect')
+            if v in verdict_counts:
+                verdict_counts[v] += 1
+            else:
+                verdict_counts['incorrect'] += 1
+
+            if v in ['correct', 'partially_correct'] or turn.get('passed'):
+                successful_turns += 1
+
+            score_sum += turn.get('score', 100 if v == 'correct' else 70 if v == 'partially_correct' else 30)
+
+        success_rate_pct = int((successful_turns / total_turns) * 100) if total_turns > 0 else (75 if t['status'] == 'completed' else 50)
+        mastery_score = int(score_sum / total_turns) if total_turns > 0 else (t['masteryScore'] or success_rate_pct)
+
+        status = "Mastered" if (mastery_score >= 80 and success_rate_pct >= 75) else "Needs Improvement" if mastery_score >= 60 else "Weak"
+
+        topic_mastery.append({
+            'topicId': tid,
+            'topicName': t['topicName'],
+            'status': status,
+            'masteryScore': mastery_score,
+            'successRatePct': success_rate_pct,
+            'totalTurns': total_turns,
+            'successfulTurns': successful_turns,
+            'conceptsCovered': list(t['conceptsCovered']),
+            'conceptsWrong': list(t['conceptsWrong']),
+            'conceptsMissing': list(t['conceptsMissing'])
+        })
+
+    consolidated_misconceptions = []
+    seen_m = set()
+    for entry in eval_log:
+        for m in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
+            if m and m not in seen_m:
+                seen_m.add(m)
+                t_name = entry.get('topicName') or topic_map.get(entry.get('topicId'), {}).get('topicName', 'Technical Topic')
+                consolidated_misconceptions.append({
+                    'misconception': m,
+                    'topicId': entry.get('topicId'),
+                    'topicName': t_name,
+                    'turnIndex': entry.get('turnIndex', 1),
+                    'remediation': f"Review reference material for {t_name} to address misconception: '{m}'"
+                })
+
+    suggested_revisions = []
+    seen_r = set()
+    for tm in topic_mastery:
+        for gap in tm['conceptsMissing']:
+            if gap and gap not in seen_r:
+                seen_r.add(gap)
+                suggested_revisions.append({
+                    'topicId': tm['topicId'],
+                    'topicName': tm['topicName'],
+                    'conceptGap': gap,
+                    'priority': 'High' if tm['masteryScore'] < 60 else 'Medium',
+                    'recommendation': f"Study '{gap}' under {tm['topicName']}."
+                })
+
     tier_info = get_company_tier_info(company_name)
 
     session_summary_json = json.dumps({
@@ -1972,6 +2972,9 @@ def generate_final_report():
         "readinessScore": calculated_readiness_score,
         "subScores": sub_scores,
         "performanceAnalysis": performance_analysis,
+        "topicMastery": topic_mastery,
+        "consolidatedMisconceptions": consolidated_misconceptions,
+        "suggestedRevisionAreas": suggested_revisions,
         "missingKeywords": resume_analysis.get('missingKeywords', []) if resume_analysis else []
     }, indent=2)
 
@@ -2021,20 +3024,6 @@ Return this exact JSON structure:
 }}
 """
 
-    if genai_client:
-        try:
-            response = genai_client.models.generate_content(
-                model='gemini-2.0-flash',
-                contents=prompt
-            )
-            raw_text = response.text
-            cleaned_text = clean_json_response(raw_text)
-            parsed_json = json.loads(cleaned_text)
-            parsed_json["companyTierInfo"] = tier_info
-            return jsonify(parsed_json)
-        except Exception as e:
-            print(f"Gemini API Exception in generate_final_report: {e}")
-
     breakdown = []
     if 'resume' in active_rounds:
         breakdown.append({"roundName": "Stage 1: Resume ATS Audit", "score": int(active_rounds['resume']), "oneLineTakeaway": "Well-formatted resume with solid project portfolio."})
@@ -2051,15 +3040,149 @@ Return this exact JSON structure:
     if 'hr_interview' in active_rounds:
         breakdown.append({"roundName": "Stage 7: HR & Culture Fit Interview", "score": int(active_rounds['hr_interview']), "oneLineTakeaway": "Strong behavioral alignment and career vision."})
 
+    if not breakdown:
+        breakdown.append({"roundName": "Interview Session Diagnostic", "score": calculated_readiness_score, "oneLineTakeaway": f"Evaluated across technical topics for {company_name} ({field_name})."})
+
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed_json = json.loads(cleaned_text)
+            parsed_json["companyTierInfo"] = tier_info
+            parsed_json["topicMastery"] = topic_mastery
+            parsed_json["consolidatedMisconceptions"] = consolidated_misconceptions
+            parsed_json["suggestedRevisionAreas"] = suggested_revisions
+            parsed_json["totalTurnsEvaluated"] = len(eval_log)
+            parsed_json["verdictCounts"] = verdict_counts
+            return jsonify(parsed_json)
+        except Exception as e:
+            print(f"Gemini API Exception in generate_final_report: {e}")
+
+    # Extract structured evaluationLog metrics directly from interviewSessions document (Prompt 2)
+    session_state = data.get('sessionState') or data.get('sessionResults') or {}
+    eval_log = session_state.get('evaluationLog', []) if isinstance(session_state, dict) else []
+    topic_plan = session_state.get('topicPlan', []) if isinstance(session_state, dict) else []
+    history_summary = session_state.get('historySummary', '') if isinstance(session_state, dict) else ''
+
+    topic_map = {}
+    for t in topic_plan:
+        tid = t.get('topicId')
+        if tid:
+            topic_map[tid] = {
+                'topicId': tid,
+                'topicName': t.get('topicName', tid),
+                'status': t.get('status', 'not_started'),
+                'masteryScore': t.get('mastery') or 75,
+                'turns': [],
+                'conceptsCovered': set(),
+                'conceptsWrong': set(),
+                'conceptsMissing': set()
+            }
+
+    for entry in eval_log:
+        tid = entry.get('topicId') or session_state.get('currentTopicId', 'general-topic')
+        if tid not in topic_map:
+            topic_map[tid] = {
+                'topicId': tid,
+                'topicName': entry.get('topicName', tid),
+                'status': 'completed',
+                'masteryScore': entry.get('score', 75),
+                'turns': [],
+                'conceptsCovered': set(),
+                'conceptsWrong': set(),
+                'conceptsMissing': set()
+            }
+        t_obj = topic_map[tid]
+        t_obj['turns'].append(entry)
+        for c in (entry.get('conceptsCorrect') or entry.get('keyConceptsCovered') or []):
+            if c: t_obj['conceptsCovered'].add(c)
+        for c in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
+            if c: t_obj['conceptsWrong'].add(c)
+        for c in (entry.get('conceptsMissing') or entry.get('keyConceptGaps') or []):
+            if c: t_obj['conceptsMissing'].add(c)
+
+    topic_mastery = []
+    verdict_counts = {'correct': 0, 'partially_correct': 0, 'incorrect': 0, 'vague': 0, 'off_topic': 0, 'dont_know': 0}
+
+    for tid, t in topic_map.items():
+        turns = t['turns']
+        total_turns = len(turns)
+        successful_turns = 0
+        score_sum = 0
+
+        for turn in turns:
+            v = turn.get('verdict') or ('correct' if turn.get('passed') else 'incorrect')
+            if v in verdict_counts:
+                verdict_counts[v] += 1
+            else:
+                verdict_counts['incorrect'] += 1
+
+            if v in ['correct', 'partially_correct'] or turn.get('passed'):
+                successful_turns += 1
+
+            score_sum += turn.get('score', 100 if v == 'correct' else 70 if v == 'partially_correct' else 30)
+
+        success_rate_pct = int((successful_turns / total_turns) * 100) if total_turns > 0 else (75 if t['status'] == 'completed' else 50)
+        mastery_score = int(score_sum / total_turns) if total_turns > 0 else (t['masteryScore'] or success_rate_pct)
+
+        status = "Mastered" if (mastery_score >= 80 and success_rate_pct >= 75) else "Needs Improvement" if mastery_score >= 60 else "Weak"
+
+        topic_mastery.append({
+            'topicId': tid,
+            'topicName': t['topicName'],
+            'status': status,
+            'masteryScore': mastery_score,
+            'successRatePct': success_rate_pct,
+            'totalTurns': total_turns,
+            'successfulTurns': successful_turns,
+            'conceptsCovered': list(t['conceptsCovered']),
+            'conceptsWrong': list(t['conceptsWrong']),
+            'conceptsMissing': list(t['conceptsMissing'])
+        })
+
+    consolidated_misconceptions = []
+    seen_m = set()
+    for entry in eval_log:
+        for m in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
+            if m and m not in seen_m:
+                seen_m.add(m)
+                t_name = entry.get('topicName') or topic_map.get(entry.get('topicId'), {}).get('topicName', 'Technical Topic')
+                consolidated_misconceptions.append({
+                    'misconception': m,
+                    'topicId': entry.get('topicId'),
+                    'topicName': t_name,
+                    'turnIndex': entry.get('turnIndex', 1),
+                    'remediation': f"Review reference material for {t_name} to address misconception: '{m}'"
+                })
+
+    suggested_revisions = []
+    seen_r = set()
+    for tm in topic_mastery:
+        for gap in tm['conceptsMissing']:
+            if gap and gap not in seen_r:
+                seen_r.add(gap)
+                suggested_revisions.append({
+                    'topicId': tm['topicId'],
+                    'topicName': tm['topicName'],
+                    'conceptGap': gap,
+                    'priority': 'High' if tm['masteryScore'] < 60 else 'Medium',
+                    'recommendation': f"Study '{gap}' under {tm['topicName']}."
+                })
+
     return jsonify({
         "readinessScore": calculated_readiness_score,
         "overallInterviewScore": calculated_readiness_score,
         "companyTierInfo": tier_info,
         "subScores": sub_scores,
         "readinessLabel": f"Strong Candidate — {tier_info['tierName']} Benchmark" if calculated_readiness_score >= 75 else "Developing Candidate — Targeted Polish Needed",
-        "executiveSummary": f"Candidate completed the {company_name} ({tier_info['tierName']}) placement drive for {field_name} with an overall interview score of {calculated_readiness_score}/100. Performance evaluated against {tier_info['tierName']} hiring standards.",
+        "executiveSummary": history_summary.strip() if history_summary.strip() else f"Candidate completed the {company_name} ({tier_info['tierName']}) placement drive for {field_name} with an overall interview score of {calculated_readiness_score}/100. Performance evaluated against {tier_info['tierName']} hiring standards.",
         "roundBreakdown": breakdown,
-        "topPriorityActions": [
+        "totalTurnsEvaluated": len(eval_log),
+        "verdictCounts": verdict_counts,
+        "topicMastery": topic_mastery,
+        "consolidatedMisconceptions": consolidated_misconceptions,
+        "suggestedRevisionAreas": suggested_revisions,
+        "topPriorityActions": [r['recommendation'] for r in suggested_revisions[:3]] if suggested_revisions else [
           f"Master company-specific interview question patterns for {company_name}.",
           "Refine vocal pacing and STAR structure during system architecture & HR questions.",
           "Expand keyword optimization in resume to target ATS filters."

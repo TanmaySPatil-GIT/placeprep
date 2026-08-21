@@ -9,8 +9,13 @@ import { analyzeSpeechMetrics } from '../services/speechAnalyzer';
 import { loadFaceApiModels, analyzeFaceFrame } from '../services/faceDetector';
 import { speakText, stopSpeech, isTTSSupported, getAvailableEnglishVoices } from '../services/speechSynthesizer';
 import { calculateConfidenceScore } from '../utils/confidenceScorer';
-import ProgressStepper from '../components/ProgressStepper';
 import { getBackendUrl } from '../config/api';
+import { 
+  initializeInterviewSession, 
+  updateStateAfterTurn 
+} from '../services/conversationStateManager.js';
+import { evaluateDecisionEngine } from '../services/decisionEngine.js';
+import { executeInterviewTurn, executeOpeningTurn } from '../services/interviewPipeline.js';
 import {
   Mic,
   MicOff,
@@ -89,6 +94,7 @@ export default function HrInterviewRoundPage() {
   const [topicFollowupCount, setTopicFollowupCount] = useState(0);
   const [aiState, setAiState] = useState('idle'); // 'speaking' | 'listening' | 'thinking' | 'idle'
   const [hasStartedSession, setHasStartedSession] = useState(false);
+  const [sessionState, setSessionState] = useState(null);
   const [isFinished, setIsFinished] = useState(false);
   const [hrResult, setHrResult] = useState(savedHrResult);
 
@@ -379,35 +385,28 @@ export default function HrInterviewRoundPage() {
     setConversationHistory([]);
     setAiState('thinking');
 
+    // Initialize Conversation State Document in Firestore
+    try {
+      const initSession = await initializeInterviewSession({
+        userId: userProfile?.uid || 'user_anon',
+        selectedCompany: companyName,
+        selectedField: 'sde',
+        roundType: 'hr',
+        difficultyLevel: difficultyLevel || 'medium'
+      });
+      setSessionState(initSession);
+    } catch (err) {
+      console.warn('HR Session initialization notice:', err.message);
+    }
+
     // Save only question IDs selected for this current session into recent tracking
     saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
 
-    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    let initialGreeting = '';
-
-    try {
-      const response = await fetch(FLASK_FOLLOWUP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedCompany: companyName,
-          targetField,
-          interviewType: 'hr',
-          difficultyLevel: difficultyLevel || 'Medium',
-          selectedLanguage: selectedLanguage?.name || 'English',
-          interviewerPersona: interviewerPersona || 'Friendly',
-          isOpening: true
-        })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.questionText) {
-          initialGreeting = data.questionText;
-        }
-      }
-    } catch (e) {
-      console.warn('HR Opening question fetch notice:', e);
-    }
+    let initialGreeting = await executeOpeningTurn({
+      sessionState: initSession,
+      roundType: 'hr',
+      backendUrl: getBackendUrl()
+    });
 
     if (!initialGreeting) {
       const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
@@ -508,52 +507,35 @@ export default function HrInterviewRoundPage() {
     console.log('\n=================== [FRONTEND DEBUG: HR INTERVIEW] ===================');
     console.log('[Interview Debug: HR] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
     console.log('[Interview Debug: HR] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
-    console.log('======================================================================\n');
-
-    const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
-    const payload = {
-      selectedCompany: companyName,
-      targetField,
-      interviewType: 'hr',
-      difficultyLevel: difficultyLevel || 'Medium',
-      selectedLanguage: selectedLanguage?.name || 'English',
-      interviewerPersona: interviewerPersona || 'Friendly',
-      conversationHistory: updatedHistory,
-      topicFollowupCount
-    };
-
-    console.log('[Interview Debug: HR] Step 2 - Payload sent to /api/interview-followup:', payload);
-
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
-
-    let backendNextQ = null;
+    console.log('======================================================================\n');    let backendNextQ = null;
     let isNewTopic = false;
 
     try {
-      const response = await fetch(FLASK_FOLLOWUP_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      const turnResult = await executeInterviewTurn({
+        sessionState,
+        question: currentSpokenQuestion,
+        studentAnswer: userTranscript,
+        roundType: 'hr',
+        currentTopicId: sessionState?.currentTopicId || 'behavioral-handling-conflict',
+        backendUrl: getBackendUrl(),
         signal: controller.signal
       });
 
       clearTimeout(fetchTimeout);
 
-      if (response.ok) {
-        const data = await response.json();
-        console.log('[Interview Debug: HR] Step 3 - Gemini response resolved:', data);
-        backendNextQ = data.interviewerResponse || data.questionText;
-        isNewTopic = data.moveToNewTopic || data.action === 'next_question';
-      } else {
-        const errBody = await response.text().catch(() => '');
-        console.error(`[Interview Debug: HR] Step 3 - API response error HTTP ${response.status}:`, errBody);
+      if (turnResult) {
+        backendNextQ = turnResult.interviewerResponse;
+        isNewTopic = turnResult.isNewTopic;
+        if (turnResult.updatedSessionState) {
+          setSessionState(turnResult.updatedSessionState);
+        }
       }
     } catch (err) {
       clearTimeout(fetchTimeout);
-      console.error('[Interview Debug: HR] Step 3 - Caught API call error:', err);
+      console.error('[Interview Debug: HR] Turn pipeline error:', err);
     } finally {
-      // Always guarantee loading state reset
+      setEvaluatingFollowup(false);
+    }  // Always guarantee loading state reset
       setAiState('idle');
     }
 

@@ -1077,6 +1077,88 @@ export default function FinalReportPage() {
               </div>
             </div>
 
+            {/* Topic-Wise Mastery Scores (Derived directly from evaluationLog) */}
+            {report.topicMastery && report.topicMastery.length > 0 && (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between border-b border-warmborder pb-2">
+                  <div className="flex items-center gap-2 text-base font-bold font-serif text-darkcharcoal-900">
+                    <Brain className="w-5 h-5 text-leaf-600" />
+                    <span>Topic-Wise Mastery Scores (Interview Evaluation Log)</span>
+                  </div>
+                  <span className="text-xs text-darkcharcoal-500 font-mono">
+                    {report.totalTurnsEvaluated || 0} Total Turns Evaluated
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {report.topicMastery.map((tm, idx) => (
+                    <div key={idx} className="rounded-2xl bg-mint-50 p-5 border border-warmborder space-y-3 shadow-warm-sm">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-bold font-serif text-darkcharcoal-900">{tm.topicName}</h4>
+                        <span className={`px-3 py-0.5 rounded-full text-xs font-extrabold font-serif ${
+                          tm.status === 'Mastered' ? 'bg-mint-100 text-leaf-600 border border-warmborder' :
+                          tm.status === 'Needs Improvement' ? 'bg-gold-100 text-gold-600 border border-gold-200' :
+                          'bg-red-50 text-red-600 border border-red-200'
+                        }`}>
+                          {tm.status} ({tm.masteryScore}%)
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-500 ${
+                          tm.masteryScore >= 80 ? 'bg-leaf-500' : tm.masteryScore >= 60 ? 'bg-gold-500' : 'bg-red-500'
+                        }`} style={{ width: `${tm.masteryScore}%` }}></div>
+                      </div>
+
+                      <div className="space-y-1 text-xs">
+                        {tm.conceptsCovered && tm.conceptsCovered.length > 0 && (
+                          <p className="text-leaf-700 font-medium">
+                            <strong>✓ Covered:</strong> {tm.conceptsCovered.join(', ')}
+                          </p>
+                        )}
+                        {tm.conceptsWrong && tm.conceptsWrong.length > 0 && (
+                          <p className="text-red-700 font-medium">
+                            <strong>⚠️ Misconceptions:</strong> {tm.conceptsWrong.join(', ')}
+                          </p>
+                        )}
+                        {tm.conceptsMissing && tm.conceptsMissing.length > 0 && (
+                          <p className="text-gold-700 font-medium">
+                            <strong>💡 Concept Gaps:</strong> {tm.conceptsMissing.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Consolidated Misconceptions Across Session */}
+            {report.consolidatedMisconceptions && report.consolidatedMisconceptions.length > 0 && (
+              <div className="rounded-3xl bg-amber-50/50 p-6 border border-gold-200 space-y-4 shadow-warm-sm">
+                <div className="flex items-center gap-2 border-b border-gold-200 pb-3">
+                  <AlertTriangle className="w-5 h-5 text-gold-600" />
+                  <h3 className="text-base font-bold font-serif text-darkcharcoal-900">
+                    Consolidated Misconceptions Flagged Across Session
+                  </h3>
+                </div>
+
+                <div className="space-y-3">
+                  {report.consolidatedMisconceptions.map((item, idx) => (
+                    <div key={idx} className="p-4 rounded-2xl bg-white border border-gold-200 text-xs space-y-1.5 shadow-warm-sm">
+                      <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                        <span className="text-red-600">⚠️ {item.misconception}</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-gold-100 text-gold-600 border border-gold-200">
+                          {item.topicName}
+                        </span>
+                      </div>
+                      <p className="text-darkcharcoal-700 font-medium">{item.remediation}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Priority Action Steps Joined directly to Course Catalog */}
             {report.topPriorityActions && report.topPriorityActions.length > 0 && (
               <div className="space-y-4 pt-2">
