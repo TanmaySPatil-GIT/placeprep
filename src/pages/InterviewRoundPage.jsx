@@ -632,6 +632,15 @@ export default function InterviewRoundPage() {
     }
 
     // 3. Call Flask Adaptive Follow-up Endpoint
+    const askedQuestionsHistory = updatedHistory
+      .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
+      .map(turn => turn.text);
+
+    console.log('\n=================== [FRONTEND DEBUG: TECHNICAL INTERVIEW] ===================');
+    console.log('[Interview Debug: Technical] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
+    console.log('[Interview Debug: Technical] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
+    console.log('=============================================================================\n');
+
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
     const payload = {
       selectedCompany: companyName,

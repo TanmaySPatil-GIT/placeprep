@@ -501,6 +501,15 @@ export default function HrInterviewRoundPage() {
       console.warn('[Interview Debug: HR] addAnswerResult is not available on PrepContext, skipping history recording');
     }
 
+    const askedQuestionsHistory = updatedHistory
+      .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
+      .map(turn => turn.text);
+
+    console.log('\n=================== [FRONTEND DEBUG: HR INTERVIEW] ===================');
+    console.log('[Interview Debug: HR] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
+    console.log('[Interview Debug: HR] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
+    console.log('======================================================================\n');
+
     const FLASK_FOLLOWUP_URL = `${getBackendUrl()}/api/interview-followup`;
     const payload = {
       selectedCompany: companyName,

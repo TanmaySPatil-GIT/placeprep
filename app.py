@@ -1288,8 +1288,17 @@ Return ONLY valid raw JSON:
     max_exchanges = 10
     remaining_exchanges = max(1, max_exchanges - total_turns_used)
 
+    # Extract all interviewer questions asked so far to enforce strict deduplication
+    asked_questions = [
+        turn.get('text', '').strip()
+        for turn in conversation_history
+        if turn.get('role') in ['interviewer', 'assistant'] and turn.get('text')
+    ]
+    asked_questions_block = "\n".join([f"- \"{q}\"" for q in asked_questions]) if asked_questions else "None yet (this is the opening exchange)."
+
     print("\n=================== [BACKEND DEBUG: /api/interview-followup] ===================")
     print(f"[Backend Debug] Company: {company_name} | Field: {target_field} | Type: {interview_type} | Turns Used: {total_turns_used}/{max_exchanges}")
+    print(f"[Backend Debug] ASKED QUESTIONS ({len(asked_questions)}): {asked_questions}")
     print(f"[Backend Debug] LATEST CANDIDATE ANSWER: \"{latest_candidate_answer}\"")
     print("================================================================================\n")
 
@@ -1315,6 +1324,16 @@ The candidate just expressed that they don't know or are unsure about the questi
 """
 
     prompt = f"""You are an experienced human interviewer conducting a live {interview_type.upper()} interview for {company_name} for the role of {target_field} ({experience_level} level, {difficulty_level} difficulty). You are not a quiz bot reading questions off a list — you are a real person having a conversation, genuinely listening to what the candidate says, and reacting the way a sharp, experienced interviewer actually would.
+
+STRICT QUESTION DEDUPLICATION & NO-REPEAT RULE:
+- Do NOT repeat, rephrase, or ask any question or topic that has ALREADY been asked in this session.
+- QUESTIONS ALREADY ASKED IN THIS SESSION:
+{asked_questions_block}
+
+- If "moveToNewTopic" is TRUE, you MUST select a COMPLETELY NEW, UNTOUCHED topic or skill area suitable for a {interview_type.upper()} interview for {target_field} at {company_name}.
+  - For TECHNICAL: switch to a distinct technical area (e.g. data structures, algorithms, system design, database indexing, API security/auth, concurrency, error handling, performance profiling, testing & CI/CD) that has NOT been asked above.
+  - For HR: switch to a distinct behavioral competency (e.g. conflict resolution, handling feedback, leadership/ownership, prioritizing under pressure, career motivation, ethical dilemmas, teamwork) that has NOT been asked above.
+- Make sure your next question is distinctly different from every question listed in QUESTIONS ALREADY ASKED IN THIS SESSION.
 
 Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said and let that genuinely shape your response:
 
@@ -1367,11 +1386,10 @@ JSON Output Required:
         except Exception as e:
             print(f"[Backend Debug] Exception parsing Gemini JSON: {e}")
 
-    # Dynamic emergency fallback logic ONLY if all Gemini API models fail
+    # Dynamic emergency fallback logic with deduplication tracking ONLY if all Gemini API models fail
     last_ans = latest_candidate_answer.strip()
-    last_ans_lower = last_ans.lower()
 
-    print(f"[Backend Debug] Gemini generation unavailable. Engaging dynamic keyword fallback for '{interview_type}' round...")
+    print(f"[Backend Debug] Gemini generation unavailable. Engaging deduplicated keyword fallback for '{interview_type}' round...")
 
     if not last_ans or last_ans == "No candidate response recorded yet.":
         fallback_text = "I didn't catch your response there — could you check your microphone and give that question a try?"
@@ -1391,21 +1409,49 @@ JSON Output Required:
             "action": "simplifyAndRetry"
         })
 
-    # Extract key nouns/technical terms from candidate answer for dynamic response
-    stopwords = {'that', 'this', 'with', 'have', 'from', 'they', 'them', 'would', 'could', 'about', 'there', 'their', 'which', 'where', 'when', 'what', 'your', 'just', 'some', 'more', 'also'}
-    candidate_keywords = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', last_ans) if w.lower() not in stopwords]
-    extracted_topic = f"'{candidate_keywords[0]}'" if candidate_keywords else "what you mentioned"
+    # Diverse fallback question pools per interview type
+    tech_fallback_pool = [
+        "Could you walk me through how you approach writing automated tests and ensuring code quality for critical components?",
+        "How do you approach database indexing and query optimization when dealing with large datasets?",
+        "Can you explain your strategy for designing secure REST APIs with authentication and rate limiting?",
+        "How do you debug performance bottlenecks or memory leaks in an active web application?",
+        "What automated testing frameworks or strategies do you use to verify code reliability?",
+        "Tell me about a technical tradeoff or architecture decision you had to make in a recent project."
+    ]
 
-    if interview_type == 'technical':
-        fallback_text = f"Thank you for walking me through your thoughts on {extracted_topic}. Could you elaborate on how you handled edge cases or system constraints for that specific component?"
+    hr_fallback_pool = [
+        "Tell me about a time you had a disagreement with a team member or stakeholder, and how you resolved it.",
+        "How do you prioritize your tasks when facing tight deadlines and competing project goals?",
+        "Can you share an example of a mistake or setback you experienced, and what you learned from it?",
+        "What motivates you most in your software engineering career, and why are you interested in joining our team?",
+        "Describe a situation where project scope changed unexpectedly. How did you adapt?",
+        "How do you approach receiving constructive feedback during code reviews or team retrospectives?"
+    ]
+
+    pool = tech_fallback_pool if interview_type == 'technical' else hr_fallback_pool
+
+    # Filter out fallback questions that overlap with questions already asked in this session
+    unasked_fallbacks = [
+        q for q in pool
+        if not any(q.lower()[:30] in aq.lower() or aq.lower()[:30] in q.lower() for aq in asked_questions)
+    ]
+
+    if unasked_fallbacks:
+        fallback_text = unasked_fallbacks[0]
     else:
-        fallback_text = f"Thank you for sharing your experience regarding {extracted_topic}. How did that situation shape your approach to team collaboration going forward?"
+        stopwords = {'that', 'this', 'with', 'have', 'from', 'they', 'them', 'would', 'could', 'about', 'there', 'their', 'which', 'where', 'when', 'what', 'your', 'just', 'some', 'more', 'also'}
+        candidate_keywords = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', last_ans) if w.lower() not in stopwords]
+        extracted_topic = f"'{candidate_keywords[0]}'" if candidate_keywords else "what you mentioned"
+        if interview_type == 'technical':
+            fallback_text = f"Thank you for sharing your thoughts on {extracted_topic}. Could you elaborate on how you handled edge cases or system constraints for that specific component?"
+        else:
+            fallback_text = f"Thank you for sharing your experience regarding {extracted_topic}. How did that situation shape your approach to team collaboration going forward?"
 
     return jsonify({
         "interviewerResponse": fallback_text,
         "questionText": fallback_text,
-        "moveToNewTopic": False,
-        "action": "followup"
+        "moveToNewTopic": True,
+        "action": "next_question"
     })
 
 
