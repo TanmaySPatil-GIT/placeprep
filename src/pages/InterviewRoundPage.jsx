@@ -759,11 +759,11 @@ export default function InterviewRoundPage() {
         </div>
       </div>
 
-      {/* Main Grid: Avatar & Video Section */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-5 lg:gap-6 items-stretch">
+      {/* Main Container: Avatar & Video Section */}
+      <div className="flex flex-col lg:flex-row gap-4 items-start">
         
         {/* Left Column: Interviewer AI Avatar */}
-        <div className="md:col-span-4 bg-forest-900 border border-forest-600/30 rounded-2xl p-5 shadow-earthy flex flex-col justify-between relative overflow-hidden h-full min-h-[380px]">
+        <div className="w-full lg:w-1/2 bg-forest-900 border border-forest-600/30 rounded-2xl p-5 shadow-earthy flex flex-col justify-between relative overflow-hidden min-h-[380px]">
           {/* Header Info */}
           <div className="flex items-center justify-between z-10">
             <div className="flex items-center gap-2">
@@ -865,8 +865,8 @@ export default function InterviewRoundPage() {
 
         </div>
 
-        {/* Right Column: Candidate Camera Feed & Speech Recording Controls (8 cols) */}
-        <div className="md:col-span-8 space-y-4">
+        {/* Right Column: Candidate Camera Feed & Speech Recording Controls */}
+        <div className="w-full lg:w-1/2 space-y-4">
           
           {/* Camera Feed Container */}
           <div className="relative aspect-video rounded-3xl border border-forest-600/40 overflow-hidden bg-forest-900 flex items-center justify-center shadow-earthy">
