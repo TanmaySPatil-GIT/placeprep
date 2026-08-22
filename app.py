@@ -429,21 +429,25 @@ Return this exact JSON structure:
                 if len(line) < 150 and line not in extracted_experience:
                     extracted_experience.append(line)
 
-        # Dynamic heuristic ATS score calculation
-        has_frameworks = any(kw in text_lower for kw in ['react', 'vue', 'angular', 'node', 'express', 'flask', 'django', 'fastapi', 'spring', 'pytorch', 'tensorflow', 'keras', 'scikit', 'docker', 'kubernetes', 'aws', 'gcp', 'azure', 'postgres', 'mongodb', 'redis'])
-        has_internship = any(kw in text_lower for kw in ['intern', 'internship', 'software engineer', 'developer intern', 'experience'])
-        has_metrics = any(re.search(r'\d+%', line) or re.search(r'\d+\s*(users|ms|k|m|requests|fps)', line, re.I) for line in lines)
-        is_aiml_branch = any(kw in text_lower for kw in ['aiml', 'ai & ml', 'artificial intelligence', 'machine learning', 'data science'])
-        has_ml_projects = any(kw in text_lower for kw in ['pytorch', 'tensorflow', 'model', 'neural', 'nlp', 'computer vision', 'classifier', 'regression', 'scikit-learn', 'deep learning'])
+        # Dynamic heuristic ATS score calculation (calibrated against Tier 1/2/3 rubrics)
+        has_frameworks = bool(re.search(r'\b(react|vue|angular|node|express|flask|django|fastapi|spring boot|pytorch|tensorflow|keras|docker|kubernetes|aws|gcp|azure|postgres|postgresql|mongodb|redis)\b', text_lower))
+        has_internship = bool(re.search(r'\b(intern|internship|software engineer intern|sde intern|developer intern|research intern|summer intern)\b', text_lower))
+        has_metrics = bool(re.search(r'(\d+%\s*(reduction|increase|improvement|boost|faster|growth))|(\b(latency|throughput|qps|users|queries)\b.*\d+)|(\d+\s*(k|m|million)\s*(users|requests|queries))', text_lower))
+        is_aiml_branch = bool(re.search(r'\b(aiml|ai & ml|artificial intelligence|machine learning|data science)\b', text_lower))
+        has_ml_projects = bool(re.search(r'\b(pytorch|tensorflow|cnn|rnn|lstm|transformer|bert|llm|huggingface|scikit-learn|yolo|computer vision|nlp|random forest|gradient boosting)\b', text_lower))
+        is_basic_html_only = bool(re.search(r'\b(html|css|javascript)\b', text_lower)) and not has_frameworks
 
-        calc_score = 35
-        if has_frameworks: calc_score += 20
-        if has_internship: calc_score += 20
+        # Calibrated base score depending on company tier
+        base_score = 25 if tier_info.get('tier', 3) == 3 else 30
+        calc_score = base_score
+        if has_frameworks: calc_score += 25
+        if has_internship: calc_score += 25
         if has_metrics: calc_score += 15
         if is_aiml_branch and has_ml_projects: calc_score += 10
         elif is_aiml_branch and not has_ml_projects: calc_score -= 10
+        if is_basic_html_only: calc_score = min(calc_score, 30)
 
-        calc_score = max(20, min(95, calc_score))
+        calc_score = max(15, min(95, calc_score))
 
         return jsonify({
             "atsScore": calc_score,

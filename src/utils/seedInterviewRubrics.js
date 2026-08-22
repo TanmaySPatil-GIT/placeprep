@@ -613,6 +613,14 @@ export const INITIAL_INTERVIEW_RUBRICS = [
  */
 export async function seedInterviewRubricsInFirestore() {
   try {
+    const projectId = db?.app?.options?.projectId || process?.env?.VITE_FIREBASE_PROJECT_ID || 'placeprep-9c53f';
+    console.log(`[Seed Script: Interview Rubrics] Target Firebase Project ID: "${projectId}"`);
+    
+    if (!db) {
+      console.warn('[Seed Script: Interview Rubrics] Firestore db instance unavailable. Skipping write.');
+      return { success: false, error: 'db unavailable' };
+    }
+
     const colRef = collection(db, 'interviewRubrics');
     let seededCount = 0;
     for (const rubric of INITIAL_INTERVIEW_RUBRICS) {
@@ -620,10 +628,10 @@ export async function seedInterviewRubricsInFirestore() {
       await setDoc(docRef, rubric);
       seededCount++;
     }
-    console.log(`Successfully seeded ${seededCount} interview rubrics in Firestore!`);
-    return { success: true, count: seededCount };
+    console.log(`[Seed Script: Interview Rubrics] Successfully seeded ${seededCount} interview rubrics in Firestore (Project: ${projectId})!`);
+    return { success: true, count: seededCount, projectId };
   } catch (error) {
-    console.error('Error seeding interview rubrics in Firestore:', error);
+    console.error('[Seed Script: Interview Rubrics] Error seeding interview rubrics in Firestore:', error);
     return { success: false, error: error.message };
   }
 }
