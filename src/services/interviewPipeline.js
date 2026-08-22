@@ -21,20 +21,25 @@ export async function executeInterviewTurn({
   // 1. Prompt 3: Call Evaluator Endpoint
   let evaluatorOutput = null;
   try {
+    const evalPayload = {
+      sessionId: safeSession.sessionId,
+      lastQuestionAsked: question,
+      studentAnswer,
+      currentTopicId: finalTopicId,
+      sessionState: safeSession
+    };
+    console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 1: /api/evaluate-answer CALLING] Payload:`, evalPayload);
     const evalResp = await fetch(`${backendUrl}/api/evaluate-answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: safeSession.sessionId,
-        lastQuestionAsked: question,
-        studentAnswer,
-        currentTopicId: finalTopicId,
-        sessionState: safeSession
-      }),
+      body: JSON.stringify(evalPayload),
       signal
     });
     if (evalResp.ok) {
       evaluatorOutput = await evalResp.json();
+      console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 1: /api/evaluate-answer RESOLVED 200] Response Data:`, evaluatorOutput);
+    } else {
+      console.warn(`[interviewPipeline:${roundType.toUpperCase()}] [API 1: /api/evaluate-answer ERROR] Status:`, evalResp.status, evalResp.statusText);
     }
   } catch (err) {
     console.warn(`[InterviewPipeline:${roundType.toUpperCase()}] Evaluator API notice:`, err.message);
@@ -50,10 +55,12 @@ export async function executeInterviewTurn({
       followUpWorthy: true,
       reason: 'Fallback evaluation response.'
     };
+    console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 1: Using Fallback Evaluator Output]`, evaluatorOutput);
   }
 
   // 2. Prompt 4: Evaluate Decision Engine Strategy
   const decisionOutput = evaluateDecisionEngine(evaluatorOutput, safeSession, studentAnswer);
+  console.log(`[interviewPipeline:${roundType.toUpperCase()}] [Decision Engine Evaluated] Strategy:`, decisionOutput);
 
   // 3. Prompt 2: Update Session State & Automatic Topic Completion Summarization
   let updatedSessionState = safeSession;
@@ -68,6 +75,7 @@ export async function executeInterviewTurn({
       });
       if (savedState) {
         updatedSessionState = savedState;
+        console.log(`[interviewPipeline:${roundType.toUpperCase()}] [Session State Updated] State:`, updatedSessionState);
       }
     } catch (stErr) {
       console.warn(`[InterviewPipeline:${roundType.toUpperCase()}] State update notice:`, stErr.message);
@@ -77,22 +85,27 @@ export async function executeInterviewTurn({
   // 4. Prompt 5: Call Question Generator Endpoint
   let interviewerResponse = null;
   try {
+    const genPayload = {
+      sessionId: updatedSessionState?.sessionId || sessionState?.sessionId,
+      strategy: decisionOutput.strategy,
+      evaluatorOutput,
+      currentTopicId: updatedSessionState?.currentTopicId || finalTopicId,
+      sessionState: updatedSessionState
+    };
+    console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: /api/generate-question CALLING] Payload:`, genPayload);
     const genResp = await fetch(`${backendUrl}/api/generate-question`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: updatedSessionState?.sessionId || sessionState?.sessionId,
-        strategy: decisionOutput.strategy,
-        evaluatorOutput,
-        currentTopicId: updatedSessionState?.currentTopicId || finalTopicId,
-        sessionState: updatedSessionState
-      }),
+      body: JSON.stringify(genPayload),
       signal
     });
 
     if (genResp.ok) {
       const genData = await genResp.json();
       interviewerResponse = genData.interviewerResponse;
+      console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: /api/generate-question RESOLVED 200] Response Data:`, genData);
+    } else {
+      console.warn(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: /api/generate-question ERROR] Status:`, genResp.status, genResp.statusText);
     }
   } catch (genErr) {
     console.warn(`[InterviewPipeline:${roundType.toUpperCase()}] Generator API notice:`, genErr.message);
@@ -100,6 +113,7 @@ export async function executeInterviewTurn({
 
   if (!interviewerResponse) {
     interviewerResponse = "Thank you for your explanation. Let's move to our next question.";
+    console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: Using Fallback Question Response]`, interviewerResponse);
   }
 
   return {

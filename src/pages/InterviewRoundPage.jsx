@@ -584,7 +584,12 @@ export default function InterviewRoundPage() {
 
   // Candidate Stops Answer & Triggers AI Adaptive Follow-Up Engine
   const handleStopAnswer = async () => {
+    console.log('[InterviewRoundPage:Tech] [setState START] setIsAnswering(false), setAiState("thinking"), setEvaluatingFollowup(true)');
     setIsAnswering(false);
+    setAiState('thinking');
+    setEvaluatingFollowup(true);
+    console.log('[InterviewRoundPage:Tech] [setState COMPLETE] isAnswering=false, aiState=thinking, evaluatingFollowup=true');
+
     const stopTimestamp = Date.now();
 
     if (recognitionRef.current) {
@@ -593,134 +598,157 @@ export default function InterviewRoundPage() {
       } catch (e) {}
     }
 
-    setAiState('thinking');
-    setEvaluatingFollowup(true);
-
-    const capturedText = (transcriptRef.current || liveTranscript).trim();
-
-    console.log('\n=================== [INTERVIEW DEBUG: TECHNICAL ROUND] ===================');
-    console.log('[Interview Debug] Step 1 - Transcript captured:', `"${capturedText}"`);
-    if (!capturedText) {
-      console.warn('[Interview Debug] WARNING: Captured transcript is empty! Mic input may not have registered.');
-    }
-
-    const userTranscript = capturedText || 'In my previous software engineering projects, I focused on system performance, modular API design, and automated testing.';
-
-    // 1. Analyze speech metrics & vision telemetry
-    const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
-    const recentLogs = telemetryLogs.slice(-20);
-    const gazeRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.gazeCentered).length / recentLogs.length) * 100) : 92;
-    const faceRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.faceDetected).length / recentLogs.length) * 100) : 95;
-
-    const answerRecord = {
-      questionId: `q-${totalExchanges}`,
-      questionText: currentSpokenQuestion,
-      transcript: userTranscript,
-      durationSeconds: answerDuration,
-      longPauseCount,
-      segmentConfidence: lastSegmentConfidence,
-      metrics,
-      visionSummary: { gazeRatio, faceRatio, expression: currentTelemetry.expression }
-    };
-
-    setSavedAnswerMetrics(answerRecord);
-    addAnswerResult(answerRecord);
-
-    // 2. Append Turn to Conversation History
-    const updatedHistory = [
-      ...conversationHistory,
-      { role: 'candidate', text: userTranscript }
-    ];
-
-    setConversationHistory(updatedHistory);
-    const newTotalExchanges = totalExchanges + 1;
-    setTotalExchanges(newTotalExchanges);
-
-    // Check if max total exchanges reached (10 exchanges round limit)
-    if (newTotalExchanges >= 10) {
-      const closingMsg = `That wraps up our mock interview for ${companyName}! Thanks for your time — let's review your diagnostic report now.`;
-      setCurrentSpokenQuestion(closingMsg);
-      setEvaluatingFollowup(false);
-
-      setTimeout(() => {
-        triggerAISpeech(closingMsg);
-        setTimeout(() => {
-          setRoundIndex(2);
-          navigate('/results');
-        }, 4000);
-      }, 1800);
-      return;
-    }
-
-    // 3. Call Flask Adaptive Follow-up Endpoint with AbortController & 15s Timeout
-    const askedQuestionsHistory = updatedHistory
-      .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
-      .map(turn => turn.text);
-
-    console.log('\n=================== [FRONTEND DEBUG: TECHNICAL INTERVIEW] ===================');
-    console.log('[Interview Debug: Technical] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
-    console.log('[Interview Debug: Technical] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
-    console.log('=============================================================================\n');
-
-    let backendNextQ = null;
-    let isNewTopic = false;
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
-
     try {
-      const activeSession = sessionStateRef.current || sessionState;
-      const turnResult = await executeInterviewTurn({
-        sessionState: activeSession,
-        question: currentSpokenQuestion,
-        studentAnswer: userTranscript,
-        roundType: 'technical',
-        currentTopicId: activeSession?.currentTopicId || 'oop-inheritance',
-        backendUrl: getBackendUrl(),
-        signal: controller.signal
-      });
+      const capturedText = (transcriptRef.current || liveTranscript).trim();
 
-      clearTimeout(fetchTimeout);
-
-      if (turnResult && turnResult.interviewerResponse) {
-        backendNextQ = turnResult.interviewerResponse;
-        isNewTopic = turnResult.isNewTopic;
-        if (turnResult.updatedSessionState) {
-          setSessionState(turnResult.updatedSessionState);
-          sessionStateRef.current = turnResult.updatedSessionState;
-        }
+      console.log('\n=================== [INTERVIEW DEBUG: TECHNICAL ROUND] ===================');
+      console.log('[Interview Debug] Step 1 - Transcript captured:', `"${capturedText}"`);
+      if (!capturedText) {
+        console.warn('[Interview Debug] WARNING: Captured transcript is empty! Mic input may not have registered.');
       }
-    } catch (err) {
-      clearTimeout(fetchTimeout);
-      console.error('[Interview Debug: Technical] Turn pipeline error:', err);
-    } finally {
-      setEvaluatingFollowup(false);
-      setAiState('idle');
-    }
 
-    // Enforce minimum interviewer reflection pause
-    const elapsedMs = Date.now() - stopTimestamp;
-    const MIN_PAUSE_MS = 1800;
-    const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
+      const userTranscript = capturedText || 'In my previous software engineering projects, I focused on system performance, modular API design, and automated testing.';
 
-    setTimeout(() => {
-      if (!backendNextQ) {
-        const errorMsg = "I encountered a connection delay processing your answer. Please submit your response again or click Retry.";
-        setCurrentSpokenQuestion(errorMsg);
+      // 1. Analyze speech metrics & vision telemetry
+      const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
+      const recentLogs = telemetryLogs.slice(-20);
+      const gazeRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.gazeCentered).length / recentLogs.length) * 100) : 92;
+      const faceRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.faceDetected).length / recentLogs.length) * 100) : 95;
+
+      const answerRecord = {
+        questionId: `q-${totalExchanges}`,
+        questionText: currentSpokenQuestion,
+        transcript: userTranscript,
+        durationSeconds: answerDuration,
+        longPauseCount,
+        segmentConfidence: lastSegmentConfidence,
+        metrics,
+        visionSummary: { gazeRatio, faceRatio, expression: currentTelemetry.expression }
+      };
+
+      setSavedAnswerMetrics(answerRecord);
+      addAnswerResult(answerRecord);
+
+      // 2. Append Turn to Conversation History
+      const updatedHistory = [
+        ...conversationHistory,
+        { role: 'candidate', text: userTranscript }
+      ];
+
+      console.log('[InterviewRoundPage:Tech] [setState START] setConversationHistory, setTotalExchanges');
+      setConversationHistory(updatedHistory);
+      const newTotalExchanges = totalExchanges + 1;
+      setTotalExchanges(newTotalExchanges);
+      console.log('[InterviewRoundPage:Tech] [setState COMPLETE] Conversation history and exchanges updated');
+
+      // Check if max total exchanges reached (10 exchanges round limit)
+      if (newTotalExchanges >= 10) {
+        const closingMsg = `That wraps up our mock interview for ${companyName}! Thanks for your time — let's review your diagnostic report now.`;
+        console.log('[InterviewRoundPage:Tech] [setState START] setCurrentSpokenQuestion (closing), setEvaluatingFollowup(false)');
+        setCurrentSpokenQuestion(closingMsg);
+        setEvaluatingFollowup(false);
         setAiState('idle');
+        console.log('[InterviewRoundPage:Tech] [setState COMPLETE] Closing message set, aiState=idle');
+
+        setTimeout(() => {
+          triggerAISpeech(closingMsg);
+          setTimeout(() => {
+            setRoundIndex(2);
+            navigate('/results');
+          }, 4000);
+        }, 1800);
         return;
       }
 
-      if (isNewTopic) {
-        setTopicFollowupCount(0);
-      } else {
-        setTopicFollowupCount(prev => prev + 1);
+      // 3. Call Flask Adaptive Follow-up Endpoint with AbortController & 15s Timeout
+      const askedQuestionsHistory = updatedHistory
+        .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
+        .map(turn => turn.text);
+
+      console.log('\n=================== [FRONTEND DEBUG: TECHNICAL INTERVIEW] ===================');
+      console.log('[Interview Debug: Technical] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
+      console.log('[Interview Debug: Technical] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
+      console.log('=============================================================================\n');
+
+      let backendNextQ = null;
+      let isNewTopic = false;
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const activeSession = sessionStateRef.current || sessionState;
+        console.log('[InterviewRoundPage:Tech] Executing turn pipeline with activeSession:', activeSession?.sessionId);
+        const turnResult = await executeInterviewTurn({
+          sessionState: activeSession,
+          question: currentSpokenQuestion,
+          studentAnswer: userTranscript,
+          roundType: 'technical',
+          currentTopicId: activeSession?.currentTopicId || 'oop-inheritance',
+          backendUrl: getBackendUrl(),
+          signal: controller.signal
+        });
+
+        clearTimeout(fetchTimeout);
+
+        if (turnResult && turnResult.interviewerResponse) {
+          backendNextQ = turnResult.interviewerResponse;
+          isNewTopic = turnResult.isNewTopic;
+          if (turnResult.updatedSessionState) {
+            console.log('[InterviewRoundPage:Tech] [setState START] setSessionState with updated session state');
+            setSessionState(turnResult.updatedSessionState);
+            sessionStateRef.current = turnResult.updatedSessionState;
+            console.log('[InterviewRoundPage:Tech] [setState COMPLETE] setSessionState updated');
+          }
+        }
+      } catch (err) {
+        clearTimeout(fetchTimeout);
+        console.error('[Interview Debug: Technical] Turn pipeline error:', err);
+      } finally {
+        console.log('[InterviewRoundPage:Tech] [setState START] setEvaluatingFollowup(false)');
+        setEvaluatingFollowup(false);
+        console.log('[InterviewRoundPage:Tech] [setState COMPLETE] setEvaluatingFollowup(false)');
       }
 
-      const nextText = backendNextQ;
-      setCurrentSpokenQuestion(nextText);
-      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
-      triggerAISpeech(nextText);
-    }, remainingPauseMs);
+      // Enforce minimum interviewer reflection pause
+      const elapsedMs = Date.now() - stopTimestamp;
+      const MIN_PAUSE_MS = 1800;
+      const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
+
+      setTimeout(() => {
+        try {
+          if (!backendNextQ) {
+            const errorMsg = "I encountered a connection delay processing your answer. Please submit your response again or click Retry.";
+            console.log('[InterviewRoundPage:Tech] [setState START] setCurrentSpokenQuestion (error fallback), setAiState("idle")');
+            setCurrentSpokenQuestion(errorMsg);
+            setAiState('idle');
+            console.log('[InterviewRoundPage:Tech] [setState COMPLETE] Error fallback set, aiState=idle');
+            return;
+          }
+
+          if (isNewTopic) {
+            setTopicFollowupCount(0);
+          } else {
+            setTopicFollowupCount(prev => prev + 1);
+          }
+
+          const nextText = backendNextQ;
+          console.log('[InterviewRoundPage:Tech] [setState START] setCurrentSpokenQuestion:', nextText);
+          setCurrentSpokenQuestion(nextText);
+          setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
+          console.log('[InterviewRoundPage:Tech] [setState COMPLETE] Next question set and added to history');
+          triggerAISpeech(nextText);
+        } finally {
+          console.log('[InterviewRoundPage:Tech] [setState START] setAiState("idle") (unconditional reset)');
+          setAiState('idle');
+          console.log('[InterviewRoundPage:Tech] [setState COMPLETE] aiState reset to idle');
+        }
+      }, remainingPauseMs);
+
+    } catch (outerErr) {
+      console.error('[InterviewRoundPage:Tech] Outer handleStopAnswer error:', outerErr);
+      setEvaluatingFollowup(false);
+      setAiState('idle');
+    }
   };
 
 

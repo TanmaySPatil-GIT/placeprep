@@ -95,6 +95,7 @@ export default function HrInterviewRoundPage() {
   const [currentSpokenQuestion, setCurrentSpokenQuestion] = useState('');
   const [topicFollowupCount, setTopicFollowupCount] = useState(0);
   const [aiState, setAiState] = useState('idle'); // 'speaking' | 'listening' | 'thinking' | 'idle'
+  const [evaluatingFollowup, setEvaluatingFollowup] = useState(false);
   const [hasStartedSession, setHasStartedSession] = useState(false);
   const [sessionState, setSessionState] = useState(null);
   const sessionStateRef = useRef(null); // mirrors sessionState for sync access in async handlers
@@ -462,7 +463,12 @@ export default function HrInterviewRoundPage() {
   };
 
   const handleStopAnswer = async () => {
+    console.log('[HrInterviewRoundPage] [setState START] setIsAnswering(false), setAiState("thinking"), setEvaluatingFollowup(true)');
     setIsAnswering(false);
+    setAiState('thinking');
+    setEvaluatingFollowup(true);
+    console.log('[HrInterviewRoundPage] [setState COMPLETE] isAnswering=false, aiState=thinking, evaluatingFollowup=true');
+
     const stopTimestamp = Date.now();
 
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
@@ -471,158 +477,182 @@ export default function HrInterviewRoundPage() {
       try { recognitionRef.current.stop(); } catch (e) {}
     }
 
-    setAiState('thinking');
+    try {
+      const capturedText = (transcriptRef.current || liveTranscript).trim();
 
-    const capturedText = (transcriptRef.current || liveTranscript).trim();
+      console.log('\n=================== [INTERVIEW DEBUG: HR ROUND] ===================');
+      console.log(`[Interview Debug: HR] Step 1 - Transcript captured for Q${questionIdx + 1}:`, `"${capturedText}"`);
+      if (!capturedText) {
+        console.warn('[Interview Debug: HR] WARNING: Captured transcript is empty! Mic input may not have registered.');
+      }
 
-    console.log('\n=================== [INTERVIEW DEBUG: HR ROUND] ===================');
-    console.log(`[Interview Debug: HR] Step 1 - Transcript captured for Q${questionIdx + 1}:`, `"${capturedText}"`);
-    if (!capturedText) {
-      console.warn('[Interview Debug: HR] WARNING: Captured transcript is empty! Mic input may not have registered.');
-    }
+      const userTranscript = capturedText || "I focus on open communication, active listening, and aligning team priorities with project milestones.";
+      
+      const updatedHistory = [
+        ...conversationHistory,
+        { role: 'candidate', text: userTranscript }
+      ];
+      console.log('[HrInterviewRoundPage] [setState START] setConversationHistory (candidate answer)');
+      setConversationHistory(updatedHistory);
+      console.log('[HrInterviewRoundPage] [setState COMPLETE] setConversationHistory updated with candidate turn');
 
-    const userTranscript = capturedText || "I focus on open communication, active listening, and aligning team priorities with project milestones.";
-    
-    const updatedHistory = [
-      ...conversationHistory,
-      { role: 'candidate', text: userTranscript }
-    ];
-    setConversationHistory(updatedHistory);
+      const speechMetrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
+      console.log('[Interview Debug: HR] Granular speech metrics calculated:', speechMetrics);
 
-    const speechMetrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
-    console.log('[Interview Debug: HR] Granular speech metrics calculated:', speechMetrics);
-
-    const metrics = calculateConfidenceScore({
-      metrics: {
-        wordsPerMinute: speechMetrics.wordsPerMinute,
-        wordCount: speechMetrics.wordCount,
-        fillerWordCount: speechMetrics.fillerWordCount,
-        longPauseCount: speechMetrics.longPauseCount
-      },
-      visionSummary: { gazeRatio: 90, faceRatio: 95 }
-    });
-
-    const isSituation = /situation|when|while|during|at/i.test(userTranscript);
-    const isTask = /task|goal|objective|needed|had to/i.test(userTranscript);
-    const isAction = /i created|i built|i decided|i led|i resolved|action/i.test(userTranscript);
-    const isResult = /result|outcome|increased|reduced|achieved|finally/i.test(userTranscript);
-    
-    const starDetected = { isSituation, isTask, isAction, isResult };
-
-    if (typeof addAnswerResult === 'function') {
-      addAnswerResult({
-        questionId: `hr-q-${questionIdx}`,
-        questionText: currentSpokenQuestion,
-        transcript: userTranscript,
-        durationSeconds: answerDuration,
-        longPauseCount,
-        metrics,
-        speechMetrics,
-        starDetected,
+      const metrics = calculateConfidenceScore({
+        metrics: {
+          wordsPerMinute: speechMetrics.wordsPerMinute,
+          wordCount: speechMetrics.wordCount,
+          fillerWordCount: speechMetrics.fillerWordCount,
+          longPauseCount: speechMetrics.longPauseCount
+        },
         visionSummary: { gazeRatio: 90, faceRatio: 95 }
       });
-    } else {
-      console.warn('[Interview Debug: HR] addAnswerResult is not available on PrepContext, skipping history recording');
-    }
 
-    const askedQuestionsHistory = updatedHistory
-      .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
-      .map(turn => turn.text);
+      const isSituation = /situation|when|while|during|at/i.test(userTranscript);
+      const isTask = /task|goal|objective|needed|had to/i.test(userTranscript);
+      const isAction = /i created|i built|i decided|i led|i resolved|action/i.test(userTranscript);
+      const isResult = /result|outcome|increased|reduced|achieved|finally/i.test(userTranscript);
+      
+      const starDetected = { isSituation, isTask, isAction, isResult };
 
-    console.log('\n=================== [FRONTEND DEBUG: HR INTERVIEW] ===================');
-    console.log('[Interview Debug: HR] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
-    console.log('[Interview Debug: HR] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
-    console.log('======================================================================\n');
-    let backendNextQ = null;
-    let isNewTopic = false;
-    const controller = new AbortController();
-    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
-
-    try {
-      const activeSession = sessionStateRef.current || sessionState;
-      const turnResult = await executeInterviewTurn({
-        sessionState: activeSession,
-        question: currentSpokenQuestion,
-        studentAnswer: userTranscript,
-        roundType: 'hr',
-        currentTopicId: activeSession?.currentTopicId || 'behavioral-handling-conflict',
-        backendUrl: getBackendUrl(),
-        signal: controller.signal
-      });
-
-      clearTimeout(fetchTimeout);
-
-      if (turnResult) {
-        backendNextQ = turnResult.interviewerResponse;
-        isNewTopic = turnResult.isNewTopic;
-        if (turnResult.updatedSessionState) {
-          setSessionState(turnResult.updatedSessionState);
-          sessionStateRef.current = turnResult.updatedSessionState;
-        }
+      if (typeof addAnswerResult === 'function') {
+        addAnswerResult({
+          questionId: `hr-q-${questionIdx}`,
+          questionText: currentSpokenQuestion,
+          transcript: userTranscript,
+          durationSeconds: answerDuration,
+          longPauseCount,
+          metrics,
+          speechMetrics,
+          starDetected,
+          visionSummary: { gazeRatio: 90, faceRatio: 95 }
+        });
+      } else {
+        console.warn('[Interview Debug: HR] addAnswerResult is not available on PrepContext, skipping history recording');
       }
-    } catch (err) {
-      clearTimeout(fetchTimeout);
-      console.error('[Interview Debug: HR] Turn pipeline error:', err);
-    } finally {
+
+      const askedQuestionsHistory = updatedHistory
+        .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
+        .map(turn => turn.text);
+
+      console.log('\n=================== [FRONTEND DEBUG: HR INTERVIEW] ===================');
+      console.log('[Interview Debug: HR] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
+      console.log('[Interview Debug: HR] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
+      console.log('======================================================================\n');
+
+      let backendNextQ = null;
+      let isNewTopic = false;
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const activeSession = sessionStateRef.current || sessionState;
+        console.log('[HrInterviewRoundPage] Executing turn pipeline with activeSession:', activeSession?.sessionId);
+        const turnResult = await executeInterviewTurn({
+          sessionState: activeSession,
+          question: currentSpokenQuestion,
+          studentAnswer: userTranscript,
+          roundType: 'hr',
+          currentTopicId: activeSession?.currentTopicId || 'behavioral-handling-conflict',
+          backendUrl: getBackendUrl(),
+          signal: controller.signal
+        });
+
+        clearTimeout(fetchTimeout);
+
+        if (turnResult) {
+          backendNextQ = turnResult.interviewerResponse;
+          isNewTopic = turnResult.isNewTopic;
+          if (turnResult.updatedSessionState) {
+            console.log('[HrInterviewRoundPage] [setState START] setSessionState with updated session state');
+            setSessionState(turnResult.updatedSessionState);
+            sessionStateRef.current = turnResult.updatedSessionState;
+            console.log('[HrInterviewRoundPage] [setState COMPLETE] setSessionState updated');
+          }
+        }
+      } catch (err) {
+        clearTimeout(fetchTimeout);
+        console.error('[Interview Debug: HR] Turn pipeline error:', err);
+      } finally {
+        console.log('[HrInterviewRoundPage] [setState START] setEvaluatingFollowup(false)');
+        setEvaluatingFollowup(false);
+        console.log('[HrInterviewRoundPage] [setState COMPLETE] setEvaluatingFollowup(false)');
+      }
+
+      // Enforce 1.8s interviewer reflection pause in 'thinking' state
+      const elapsedMs = Date.now() - stopTimestamp;
+      const MIN_PAUSE_MS = 1800;
+      const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
+
+      setTimeout(() => {
+        try {
+          if (questionIdx < 7) {
+            if (!backendNextQ) {
+              const errorMsg = "I encountered an issue generating an AI follow-up response. Please try submitting your response again.";
+              console.log('[HrInterviewRoundPage] [setState START] setCurrentSpokenQuestion (fallback error message), setAiState("idle")');
+              setCurrentSpokenQuestion(errorMsg);
+              setAiState('idle');
+              console.log('[HrInterviewRoundPage] [setState COMPLETE] setCurrentSpokenQuestion set, aiState=idle');
+              return;
+            }
+
+            const nextIdx = questionIdx + 1;
+            console.log('[HrInterviewRoundPage] [setState START] setQuestionIdx:', nextIdx);
+            setQuestionIdx(nextIdx);
+            console.log('[HrInterviewRoundPage] [setState COMPLETE] setQuestionIdx updated');
+
+            if (isNewTopic) {
+              setTopicFollowupCount(0);
+            } else {
+              setTopicFollowupCount(prev => prev + 1);
+            }
+
+            const nextText = backendNextQ;
+            console.log('[HrInterviewRoundPage] [setState START] setCurrentSpokenQuestion:', nextText);
+            setCurrentSpokenQuestion(nextText);
+            setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
+            console.log('[HrInterviewRoundPage] [setState COMPLETE] setCurrentSpokenQuestion and setConversationHistory updated');
+            
+            triggerAISpeech(nextText);
+          } else {
+            const finalText = `Thank you! That completes Stage 6 — HR & Culture Fit Interview for ${companyName}. I have recorded your responses for the final evaluation.`;
+            console.log('[HrInterviewRoundPage] [setState START] setCurrentSpokenQuestion (final), setHrResult, setIsFinished(true)');
+            setCurrentSpokenQuestion(finalText);
+            triggerAISpeech(finalText);
+
+            const starScore = Object.values(starDetected).filter(Boolean).length * 25;
+            const finalCommunicationScore = Math.round((metrics.compositeScore * 0.5) + (starScore * 0.5));
+
+            const finalResult = {
+              score: finalCommunicationScore,
+              clarityScore: metrics.compositeScore,
+              starAdherenceScore: starScore,
+              answersCount: questionIdx + 1,
+              isPassed: true,
+              summary: `Strong candidate alignment with ${companyName} culture and STAR-structured communication.`,
+              timestamp: new Date().toISOString()
+            };
+
+            setHrResult(finalResult);
+            if (typeof setHrInterviewResult === 'function') {
+              setHrInterviewResult(finalResult);
+            }
+            setIsFinished(true);
+            console.log('[HrInterviewRoundPage] [setState COMPLETE] setHrResult and setIsFinished updated');
+          }
+        } finally {
+          console.log('[HrInterviewRoundPage] [setState START] setAiState("idle") (unconditional reset)');
+          setAiState('idle');
+          console.log('[HrInterviewRoundPage] [setState COMPLETE] aiState reset to idle');
+        }
+      }, remainingPauseMs);
+
+    } catch (outerErr) {
+      console.error('[HrInterviewRoundPage] Outer handleStopAnswer error:', outerErr);
       setEvaluatingFollowup(false);
       setAiState('idle');
     }
-
-    // Enforce 1.8s interviewer reflection pause in 'thinking' state
-    const elapsedMs = Date.now() - stopTimestamp;
-    const MIN_PAUSE_MS = 1800;
-    const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
-
-    setTimeout(() => {
-      if (questionIdx < 7) {
-        if (!backendNextQ) {
-          const errorMsg = "I encountered an issue generating an AI follow-up response. Please try submitting your response again.";
-          setCurrentSpokenQuestion(errorMsg);
-          setAiState('idle');
-          return;
-        }
-
-        const nextIdx = questionIdx + 1;
-        setQuestionIdx(nextIdx);
-        if (isNewTopic) {
-          setTopicFollowupCount(0);
-        } else {
-          setTopicFollowupCount(prev => prev + 1);
-        }
-
-        const nextText = backendNextQ;
-        
-        setCurrentSpokenQuestion(nextText);
-        setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
-        triggerAISpeech(nextText);
-      } else {
-        const finalText = `Thank you! That completes Stage 6 — HR & Culture Fit Interview for ${companyName}. I have recorded your responses for the final evaluation.`;
-        setCurrentSpokenQuestion(finalText);
-        triggerAISpeech(finalText);
-
-        const starScore = Object.values(starDetected).filter(Boolean).length * 25;
-        const finalCommunicationScore = Math.round((metrics.compositeScore * 0.5) + (starScore * 0.5));
-
-        const finalResult = {
-          score: finalCommunicationScore,
-          clarityScore: metrics.compositeScore,
-          starAdherenceScore: starScore,
-          answersCount: questionIdx + 1,
-          isPassed: true,
-          summary: `Strong candidate alignment with ${companyName} culture and STAR-structured communication.`,
-          timestamp: new Date().toISOString()
-        };
-
-        setHrResult(finalResult);
-        if (typeof setHrInterviewResult === 'function') {
-          setHrInterviewResult(finalResult);
-        }
-        setIsFinished(true);
-      }
-      // Ensure aiState transitions out of 'thinking' so UI never gets stuck in infinite loading state
-      setAiState('idle');
-      console.log('[Interview Debug: HR] State update complete: aiState reset to idle');
-    }, remainingPauseMs);
   };
 
 
@@ -727,7 +757,7 @@ export default function HrInterviewRoundPage() {
                 <button
                   type="button"
                   onClick={handleStartAnswer}
-                  disabled={aiState === 'speaking' || aiState === 'thinking'}
+                  disabled={aiState === 'speaking' || aiState === 'thinking' || evaluatingFollowup}
                   className="px-6 py-2.5 rounded-full bg-leaf-500 hover:bg-leaf-600 text-white font-extrabold text-xs shadow-warm-md hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center gap-2"
                 >
                   {aiState === 'thinking' ? (
