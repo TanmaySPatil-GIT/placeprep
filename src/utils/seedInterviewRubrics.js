@@ -558,7 +558,13 @@ export async function seedInterviewRubricsInFirestore() {
  */
 export async function fetchInterviewRubricsFromFirestore() {
   try {
-    const snap = await getDocs(collection(db, 'interviewRubrics'));
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('interviewRubrics fetch timeout')), 4000)
+    );
+    const snap = await Promise.race([
+      getDocs(collection(db, 'interviewRubrics')),
+      timeoutPromise
+    ]);
     if (!snap.empty) {
       return snap.docs.map(docSnap => ({
         topicId: docSnap.id,
@@ -566,7 +572,7 @@ export async function fetchInterviewRubricsFromFirestore() {
       }));
     } else {
       console.log('interviewRubrics collection empty in Firestore, auto-seeding...');
-      await seedInterviewRubricsInFirestore();
+      seedInterviewRubricsInFirestore().catch(() => {});
       return INITIAL_INTERVIEW_RUBRICS;
     }
   } catch (error) {

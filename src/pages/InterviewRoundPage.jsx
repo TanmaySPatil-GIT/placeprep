@@ -106,6 +106,7 @@ export default function InterviewRoundPage() {
   const [aiState, setAiState] = useState('idle'); // 'speaking' | 'listening' | 'thinking' | 'idle'
   const [aiReasoning, setAiReasoning] = useState('');
   const [sessionState, setSessionState] = useState(null);
+  const sessionStateRef = useRef(null); // mirrors sessionState for sync access in async handlers
 
   // Video & Stream refs
   const videoRef = useRef(null);
@@ -488,44 +489,66 @@ export default function InterviewRoundPage() {
 
   // Start Conversational Interview Session (Opening Greeting & Question)
   const handleStartInterviewSession = async () => {
+    console.log('[OpeningTurn Debug: TECHNICAL] 1. handleStartInterviewSession triggered.');
     setHasStartedSession(true);
     setTotalExchanges(0);
     setConversationHistory([]);
     setAiState('thinking');
 
-    // Initialize Conversation State Document in Firestore
+    let initSession = null;
     try {
-      const initSession = await initializeInterviewSession({
+      console.log('[OpeningTurn Debug: TECHNICAL] 2. Awaiting initializeInterviewSession...');
+      const sessionPromise = initializeInterviewSession({
         userId: userProfile?.uid || 'user_anon',
         selectedCompany: companyName,
-        selectedField: targetFieldId,
+        selectedField: targetFieldId || 'sde',
         roundType: 'technical',
         difficultyLevel: difficultyLevel || 'medium'
       });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
+      );
+      initSession = await Promise.race([sessionPromise, timeoutPromise]);
+      console.log('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
       setSessionState(initSession);
+      sessionStateRef.current = initSession;
     } catch (err) {
-      console.warn('Session initialization notice:', err.message);
+      console.warn('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession notice:', err.message);
     }
 
-    let openingText = await executeOpeningTurn({
-      sessionState: initSession,
-      roundType: 'technical',
-      backendUrl: getBackendUrl()
-    });
+    let openingText = null;
+    try {
+      console.log('[OpeningTurn Debug: TECHNICAL] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
+      const openingPromise = executeOpeningTurn({
+        sessionState: initSession,
+        roundType: 'technical',
+        backendUrl: getBackendUrl()
+      });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
+      );
+      openingText = await Promise.race([openingPromise, timeoutPromise]);
+      console.log('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn completed. Opening text:', openingText);
+    } catch (opErr) {
+      console.warn('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn notice:', opErr.message);
+    }
 
     if (!openingText) {
+      console.log('[OpeningTurn Debug: TECHNICAL] 6. Using initial fallback opening question.');
       const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
       const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
       openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
     }
 
+    console.log('[OpeningTurn Debug: TECHNICAL] 7. Setting opening question and resetting aiState to idle.');
     setCurrentSpokenQuestion(openingText);
     setCurrentBasedOn(`${companyName} Technical Assessment`);
     setConversationHistory([{ role: 'interviewer', text: openingText }]);
+    setAiState('idle');
 
     setTimeout(() => {
       triggerAISpeech(openingText);
-    }, 1000);
+    }, 500);
   };
 
   // Restart Interview Session (Triggers fresh shuffle & recent question exclusion)
@@ -629,7 +652,7 @@ export default function InterviewRoundPage() {
       return;
     }
 
-    // 3. Call Flask Adaptive Follow-up Endpoint
+    // 3. Call Flask Adaptive Follow-up Endpoint with AbortController & 15s Timeout
     const askedQuestionsHistory = updatedHistory
       .filter(turn => turn.role === 'interviewer' || turn.role === 'assistant')
       .map(turn => turn.text);
@@ -641,25 +664,29 @@ export default function InterviewRoundPage() {
 
     let backendNextQ = null;
     let isNewTopic = false;
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
 
     try {
+      const activeSession = sessionStateRef.current || sessionState;
       const turnResult = await executeInterviewTurn({
-        sessionState,
+        sessionState: activeSession,
         question: currentSpokenQuestion,
         studentAnswer: userTranscript,
         roundType: 'technical',
-        currentTopicId: sessionState?.currentTopicId || 'oop-inheritance',
+        currentTopicId: activeSession?.currentTopicId || 'oop-inheritance',
         backendUrl: getBackendUrl(),
         signal: controller.signal
       });
 
       clearTimeout(fetchTimeout);
 
-      if (turnResult) {
+      if (turnResult && turnResult.interviewerResponse) {
         backendNextQ = turnResult.interviewerResponse;
         isNewTopic = turnResult.isNewTopic;
         if (turnResult.updatedSessionState) {
           setSessionState(turnResult.updatedSessionState);
+          sessionStateRef.current = turnResult.updatedSessionState;
         }
       }
     } catch (err) {
@@ -667,34 +694,32 @@ export default function InterviewRoundPage() {
       console.error('[Interview Debug: Technical] Turn pipeline error:', err);
     } finally {
       setEvaluatingFollowup(false);
+      setAiState('idle');
     }
 
-    // Enforce 1.8s interviewer reflection pause in 'thinking' state
+    // Enforce minimum interviewer reflection pause
     const elapsedMs = Date.now() - stopTimestamp;
     const MIN_PAUSE_MS = 1800;
     const remainingPauseMs = Math.max(0, MIN_PAUSE_MS - elapsedMs);
 
     setTimeout(() => {
       if (!backendNextQ) {
-        const errorMsg = "I encountered an issue generating an AI follow-up response. Please try submitting your response again.";
+        const errorMsg = "I encountered a connection delay processing your answer. Please submit your response again or click Retry.";
         setCurrentSpokenQuestion(errorMsg);
         setAiState('idle');
         return;
       }
 
-      const nextSpokenText = backendNextQ;
-
       if (isNewTopic) {
         setTopicFollowupCount(0);
-        setCurrentBasedOn(`${companyName} Assessment Focus`);
       } else {
         setTopicFollowupCount(prev => prev + 1);
-        setCurrentBasedOn('Conversational Probing & Exploration');
       }
 
-      setCurrentSpokenQuestion(nextSpokenText);
-      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextSpokenText }]);
-      triggerAISpeech(nextSpokenText);
+      const nextText = backendNextQ;
+      setCurrentSpokenQuestion(nextText);
+      setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);
+      triggerAISpeech(nextText);
     }, remainingPauseMs);
   };
 

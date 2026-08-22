@@ -69,6 +69,9 @@ export function checkNavigationIntent(studentAnswer = '') {
  * { strategy: string, topicAdvance: boolean, newDifficultyLevel: string | null }
  */
 export function evaluateDecisionEngine(evaluatorOutput = {}, sessionState = {}, studentAnswer = '') {
+  // Null guard — sessionState may not yet be populated on the first turn
+  const safeSession = sessionState || {};
+
   // 1. Early Check: Conversational Navigation Intent
   const navIntent = checkNavigationIntent(studentAnswer);
   if (navIntent) {
@@ -79,8 +82,8 @@ export function evaluateDecisionEngine(evaluatorOutput = {}, sessionState = {}, 
     };
   }
 
-  const currentDepth = sessionState.currentDepth || 0;
-  const currentDiff = (sessionState.difficultyLevel || 'medium').toLowerCase();
+  const currentDepth = safeSession.currentDepth || 0;
+  const currentDiff = (safeSession.difficultyLevel || 'medium').toLowerCase();
   const verdict = (evaluatorOutput.verdict || 'partially_correct').toLowerCase();
   const confidence = (evaluatorOutput.confidenceOfStudent || 'medium').toLowerCase();
   const conceptsMissing = evaluatorOutput.conceptsMissing || [];

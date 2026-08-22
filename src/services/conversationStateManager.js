@@ -1,11 +1,61 @@
-import { collection, doc, setDoc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase.js';
-import { fetchInterviewRubricsByField, INITIAL_INTERVIEW_RUBRICS } from '../utils/seedInterviewRubrics.js';
+import { INITIAL_INTERVIEW_RUBRICS } from '../utils/seedInterviewRubrics.js';
 import { evaluateDecisionEngine } from './decisionEngine.js';
 
+// ---------------------------------------------------------------------------
+// Internal helper: fire-and-forget Firestore write (never blocks the caller)
+// ---------------------------------------------------------------------------
+function firestoreSaveAsync(collectionPath, docId, data, merge = false) {
+  if (!db || !docId) return;
+  try {
+    const docRef = doc(db, collectionPath, docId);
+    const promise = merge
+      ? setDoc(docRef, data, { merge: true })
+      : setDoc(docRef, data);
+    promise
+      .then(() => console.log(`[Firestore] Saved ${collectionPath}/${docId}`))
+      .catch(err => console.warn(`[Firestore] Background save notice (${collectionPath}/${docId}):`, err.message));
+  } catch (err) {
+    console.warn(`[Firestore] Save setup error (${collectionPath}/${docId}):`, err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helper: build topicPlan synchronously from in-memory rubrics
+// No Firestore reads. Always resolves immediately.
+// ---------------------------------------------------------------------------
+function buildTopicPlanSync(selectedField, roundType) {
+  let rubrics = INITIAL_INTERVIEW_RUBRICS;
+
+  const fieldFiltered = rubrics.filter(r => r.fieldIds && r.fieldIds.includes(selectedField));
+  if (fieldFiltered.length >= 3) rubrics = fieldFiltered;
+
+  let filtered = roundType === 'hr'
+    ? rubrics.filter(r => r.topicId.startsWith('behavioral-'))
+    : rubrics.filter(r => !r.topicId.startsWith('behavioral-'));
+
+  if (filtered.length < 3) {
+    filtered = roundType === 'hr'
+      ? INITIAL_INTERVIEW_RUBRICS.filter(r => r.topicId.startsWith('behavioral-'))
+      : INITIAL_INTERVIEW_RUBRICS.filter(r => !r.topicId.startsWith('behavioral-'));
+  }
+  if (filtered.length < 3) filtered = INITIAL_INTERVIEW_RUBRICS;
+
+  const shuffled = [...filtered].sort(() => 0.5 - Math.random());
+  const selected = shuffled.slice(0, Math.min(5, Math.max(3, shuffled.length)));
+
+  return selected.map((t, idx) => ({
+    topicId: t.topicId,
+    topicName: t.topicName,
+    status: idx === 0 ? 'in_progress' : 'not_started',
+    mastery: null
+  }));
+}
+
 /**
- * 1. Initialize a new Interview Session Document in Firestore (`interviewSessions` collection).
- * Picks 3-5 matching topics from interviewRubrics for topicPlan.
+ * 1. Initialize a new Interview Session — SYNCHRONOUS topic plan construction,
+ *    fire-and-forget Firestore write. Returns immediately (< 1 ms, no Firestore reads).
  */
 export async function initializeInterviewSession({
   sessionId,
@@ -16,43 +66,9 @@ export async function initializeInterviewSession({
   difficultyLevel = 'medium'
 }) {
   const finalSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  console.log('[ConversationStateManager] Building session synchronously for:', finalSessionId);
 
-  // Fetch rubrics matching the selected field
-  let availableRubrics = [];
-  try {
-    availableRubrics = await fetchInterviewRubricsByField(selectedField);
-  } catch (e) {
-    console.warn('[ConversationStateManager] Error fetching rubrics, using fallback:', e.message);
-  }
-
-  if (!availableRubrics || availableRubrics.length === 0) {
-    availableRubrics = INITIAL_INTERVIEW_RUBRICS;
-  }
-
-  // Filter rubrics based on roundType
-  let filtered = [];
-  if (roundType === 'hr') {
-    filtered = availableRubrics.filter(r => r.topicId.startsWith('behavioral-'));
-    if (filtered.length < 3) {
-      filtered = INITIAL_INTERVIEW_RUBRICS.filter(r => r.topicId.startsWith('behavioral-'));
-    }
-  } else {
-    filtered = availableRubrics.filter(r => !r.topicId.startsWith('behavioral-'));
-    if (filtered.length < 3) {
-      filtered = availableRubrics;
-    }
-  }
-
-  // Shuffle and pick 3 to 5 topics
-  const shuffled = [...filtered].sort(() => 0.5 - Math.random());
-  const selectedTopics = shuffled.slice(0, Math.min(5, Math.max(3, shuffled.length)));
-
-  const topicPlan = selectedTopics.map((t, idx) => ({
-    topicId: t.topicId,
-    topicName: t.topicName,
-    status: idx === 0 ? 'in_progress' : 'not_started',
-    mastery: null
-  }));
+  const topicPlan = buildTopicPlanSync(selectedField, roundType);
 
   const initialSession = {
     sessionId: finalSessionId,
@@ -61,7 +77,7 @@ export async function initializeInterviewSession({
     selectedField,
     roundType: roundType.toLowerCase(),
     topicPlan,
-    currentTopicId: topicPlan[0]?.topicId || 'oop-inheritance',
+    currentTopicId: topicPlan[0]?.topicId || (roundType === 'hr' ? 'behavioral-handling-conflict' : 'oop-inheritance'),
     currentDepth: 0,
     difficultyLevel: difficultyLevel.toLowerCase(),
     historySummary: '',
@@ -73,15 +89,10 @@ export async function initializeInterviewSession({
     updatedAt: new Date().toISOString()
   };
 
-  try {
-    if (db) {
-      const docRef = doc(db, 'interviewSessions', finalSessionId);
-      await setDoc(docRef, initialSession);
-      console.log(`[ConversationStateManager] Session ${finalSessionId} initialized in Firestore.`);
-    }
-  } catch (err) {
-    console.warn('[ConversationStateManager] Firestore save notice (offline fallback):', err.message);
-  }
+  console.log('[ConversationStateManager] Session built. Topics:', topicPlan.map(t => t.topicId));
+
+  // Fire-and-forget Firestore write — never blocks the caller
+  firestoreSaveAsync('interviewSessions', finalSessionId, initialSession, false);
 
   return initialSession;
 }
@@ -94,8 +105,14 @@ export async function getInterviewSession(sessionId) {
   try {
     if (db) {
       const docRef = doc(db, 'interviewSessions', sessionId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('getInterviewSession timeout')), 4000)
+      );
+      const snap = await Promise.race([
+        getDoc(docRef),
+        timeoutPromise
+      ]);
+      if (snap && snap.exists()) {
         return snap.data();
       }
     }
@@ -243,16 +260,8 @@ export async function updateStateAfterTurn(sessionId, {
 
   updatedSession.updatedAt = new Date().toISOString();
 
-  // F. Save to Firestore `interviewSessions` collection
-  try {
-    if (db && updatedSession.sessionId) {
-      const docRef = doc(db, 'interviewSessions', updatedSession.sessionId);
-      await setDoc(docRef, updatedSession, { merge: true });
-      console.log(`[ConversationStateManager] Session ${updatedSession.sessionId} updated in Firestore.`);
-    }
-  } catch (err) {
-    console.warn('[ConversationStateManager] Firestore update notice:', err.message);
-  }
+  // F. Fire-and-forget Firestore write — never blocks the caller
+  firestoreSaveAsync('interviewSessions', updatedSession.sessionId, updatedSession, true);
 
   return updatedSession;
 }

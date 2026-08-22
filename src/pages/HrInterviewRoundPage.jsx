@@ -37,6 +37,8 @@ import {
 } from 'lucide-react';
 
 import { shuffleArray } from '../utils/shuffle';
+import ProgressStepper from '../components/ProgressStepper';
+
 
 const RECENT_HR_STORAGE_KEY = 'placeprep_recent_hr_qids';
 
@@ -95,6 +97,7 @@ export default function HrInterviewRoundPage() {
   const [aiState, setAiState] = useState('idle'); // 'speaking' | 'listening' | 'thinking' | 'idle'
   const [hasStartedSession, setHasStartedSession] = useState(false);
   const [sessionState, setSessionState] = useState(null);
+  const sessionStateRef = useRef(null); // mirrors sessionState for sync access in async handlers
   const [isFinished, setIsFinished] = useState(false);
   const [hrResult, setHrResult] = useState(savedHrResult);
 
@@ -380,45 +383,67 @@ export default function HrInterviewRoundPage() {
   };
 
   const handleStartSession = async () => {
+    console.log('[OpeningTurn Debug: HR] 1. handleStartSession triggered.');
     setHasStartedSession(true);
     setQuestionIdx(0);
     setConversationHistory([]);
     setAiState('thinking');
 
-    // Initialize Conversation State Document in Firestore
+    let initSession = null;
     try {
-      const initSession = await initializeInterviewSession({
+      console.log('[OpeningTurn Debug: HR] 2. Awaiting initializeInterviewSession...');
+      const sessionPromise = initializeInterviewSession({
         userId: userProfile?.uid || 'user_anon',
         selectedCompany: companyName,
         selectedField: 'sde',
         roundType: 'hr',
         difficultyLevel: difficultyLevel || 'medium'
       });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
+      );
+      initSession = await Promise.race([sessionPromise, timeoutPromise]);
+      console.log('[OpeningTurn Debug: HR] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
       setSessionState(initSession);
+      sessionStateRef.current = initSession;
     } catch (err) {
-      console.warn('HR Session initialization notice:', err.message);
+      console.warn('[OpeningTurn Debug: HR] 3. HR Session initialization notice:', err.message);
     }
 
     // Save only question IDs selected for this current session into recent tracking
     saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
 
-    let initialGreeting = await executeOpeningTurn({
-      sessionState: initSession,
-      roundType: 'hr',
-      backendUrl: getBackendUrl()
-    });
+    let initialGreeting = null;
+    try {
+      console.log('[OpeningTurn Debug: HR] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
+      const openingPromise = executeOpeningTurn({
+        sessionState: initSession,
+        roundType: 'hr',
+        backendUrl: getBackendUrl()
+      });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
+      );
+      initialGreeting = await Promise.race([openingPromise, timeoutPromise]);
+      console.log('[OpeningTurn Debug: HR] 5. executeOpeningTurn completed. Opening text:', initialGreeting);
+    } catch (opErr) {
+      console.warn('[OpeningTurn Debug: HR] 5. HR executeOpeningTurn notice:', opErr.message);
+    }
 
     if (!initialGreeting) {
+      console.log('[OpeningTurn Debug: HR] 6. Using initial fallback opening question.');
       const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
       initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
     }
     
+    console.log('[OpeningTurn Debug: HR] 7. Setting opening question and resetting aiState to idle.');
     setCurrentSpokenQuestion(initialGreeting);
     setConversationHistory([{ role: 'interviewer', text: initialGreeting }]);
+    setAiState('idle');
 
     setTimeout(() => {
       triggerAISpeech(initialGreeting);
-    }, 1000);
+    }, 500);
   };
 
   const handleStartAnswer = () => {
@@ -507,16 +532,20 @@ export default function HrInterviewRoundPage() {
     console.log('\n=================== [FRONTEND DEBUG: HR INTERVIEW] ===================');
     console.log('[Interview Debug: HR] PREVIOUSLY ASKED QUESTIONS (Count:', askedQuestionsHistory.length, '):', askedQuestionsHistory);
     console.log('[Interview Debug: HR] FULL CONVERSATION HISTORY PAYLOAD:', updatedHistory);
-    console.log('======================================================================\n');    let backendNextQ = null;
+    console.log('======================================================================\n');
+    let backendNextQ = null;
     let isNewTopic = false;
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
 
     try {
+      const activeSession = sessionStateRef.current || sessionState;
       const turnResult = await executeInterviewTurn({
-        sessionState,
+        sessionState: activeSession,
         question: currentSpokenQuestion,
         studentAnswer: userTranscript,
         roundType: 'hr',
-        currentTopicId: sessionState?.currentTopicId || 'behavioral-handling-conflict',
+        currentTopicId: activeSession?.currentTopicId || 'behavioral-handling-conflict',
         backendUrl: getBackendUrl(),
         signal: controller.signal
       });
@@ -528,6 +557,7 @@ export default function HrInterviewRoundPage() {
         isNewTopic = turnResult.isNewTopic;
         if (turnResult.updatedSessionState) {
           setSessionState(turnResult.updatedSessionState);
+          sessionStateRef.current = turnResult.updatedSessionState;
         }
       }
     } catch (err) {
@@ -535,7 +565,6 @@ export default function HrInterviewRoundPage() {
       console.error('[Interview Debug: HR] Turn pipeline error:', err);
     } finally {
       setEvaluatingFollowup(false);
-    }  // Always guarantee loading state reset
       setAiState('idle');
     }
 

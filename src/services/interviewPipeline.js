@@ -14,7 +14,9 @@ export async function executeInterviewTurn({
   backendUrl,
   signal
 }) {
-  const finalTopicId = currentTopicId || sessionState?.currentTopicId || (roundType === 'hr' ? 'behavioral-handling-conflict' : 'oop-inheritance');
+  // Null guard — sessionState may be null on first turn if React state hasn't propagated
+  const safeSession = sessionState || {};
+  const finalTopicId = currentTopicId || safeSession.currentTopicId || (roundType === 'hr' ? 'behavioral-handling-conflict' : 'oop-inheritance');
 
   // 1. Prompt 3: Call Evaluator Endpoint
   let evaluatorOutput = null;
@@ -23,11 +25,11 @@ export async function executeInterviewTurn({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sessionId: sessionState?.sessionId,
+        sessionId: safeSession.sessionId,
         lastQuestionAsked: question,
         studentAnswer,
         currentTopicId: finalTopicId,
-        sessionState
+        sessionState: safeSession
       }),
       signal
     });
@@ -51,14 +53,14 @@ export async function executeInterviewTurn({
   }
 
   // 2. Prompt 4: Evaluate Decision Engine Strategy
-  const decisionOutput = evaluateDecisionEngine(evaluatorOutput, sessionState, studentAnswer);
+  const decisionOutput = evaluateDecisionEngine(evaluatorOutput, safeSession, studentAnswer);
 
   // 3. Prompt 2: Update Session State & Automatic Topic Completion Summarization
-  let updatedSessionState = sessionState;
-  if (sessionState?.sessionId) {
+  let updatedSessionState = safeSession;
+  if (safeSession.sessionId) {
     try {
-      const savedState = await updateStateAfterTurn(sessionState.sessionId, {
-        sessionState,
+      const savedState = await updateStateAfterTurn(safeSession.sessionId, {
+        sessionState: safeSession,
         question,
         studentAnswer,
         evaluatorOutput,
@@ -121,22 +123,30 @@ export async function executeOpeningTurn({
   const topicId = sessionState?.currentTopicId || defaultTopicId;
 
   try {
+    const payload = {
+      sessionId: sessionState?.sessionId,
+      currentTopicId: topicId,
+      isOpening: true,
+      sessionState
+    };
+    console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 1 - START] Fetching ${backendUrl || ''}/api/generate-question with payload:`, payload);
     const response = await fetch(`${backendUrl}/api/generate-question`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionState?.sessionId,
-        currentTopicId: topicId,
-        isOpening: true,
-        sessionState
-      })
+      body: JSON.stringify(payload)
     });
+    console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 1 - END] Received response status:`, response.status, response.statusText);
+
     if (response.ok) {
+      console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 2 - START] Parsing response.json()...`);
       const data = await response.json();
+      console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 2 - END] Parsed JSON data:`, data);
       return data.interviewerResponse || null;
+    } else {
+      console.warn(`[executeOpeningTurn:${roundType.toUpperCase()}] Non-ok response: ${response.status} ${response.statusText}`);
     }
   } catch (e) {
-    console.warn(`[InterviewPipeline:${roundType.toUpperCase()}] Opening turn notice:`, e);
+    console.warn(`[executeOpeningTurn:${roundType.toUpperCase()}] Opening turn notice/error:`, e);
   }
   return null;
 }
