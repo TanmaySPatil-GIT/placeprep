@@ -49,11 +49,16 @@ export default function TechnicalMcqRoundPage() {
     const fetchMcqQuestions = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(db, 'technicalMcqQuestions'));
-        let fetched = [];
-        if (!snap.empty) {
-          fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        } else {
+        let fetched = INITIAL_TECHNICAL_MCQ_QUESTIONS;
+        try {
+          if (db) {
+            const snap = await getDocs(collection(db, 'technicalMcqQuestions'));
+            if (snap && !snap.empty) {
+              fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            }
+          }
+        } catch (firestoreErr) {
+          console.warn('[TechnicalMcqRoundPage] Firestore read notice, using initial dataset:', firestoreErr.message);
           fetched = INITIAL_TECHNICAL_MCQ_QUESTIONS;
         }
 
@@ -63,8 +68,9 @@ export default function TechnicalMcqRoundPage() {
 
         setQuestions(shuffleArray(matched));
       } catch (err) {
-        console.warn('Tech MCQ fetch notice:', err.message);
-        setQuestions(shuffleArray(INITIAL_TECHNICAL_MCQ_QUESTIONS));
+        console.warn('Tech MCQ error, fallback to filtered dataset:', err.message);
+        const matchedFallback = INITIAL_TECHNICAL_MCQ_QUESTIONS.filter(q => q.fieldId === fieldId || q.fieldId === 'sde');
+        setQuestions(shuffleArray(matchedFallback.length > 0 ? matchedFallback : INITIAL_TECHNICAL_MCQ_QUESTIONS));
       } finally {
         setLoading(false);
       }

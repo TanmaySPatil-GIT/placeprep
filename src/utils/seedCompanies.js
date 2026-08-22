@@ -1,3 +1,6 @@
+import { collection, doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase.js';
+
 export function getCompanyTier(companyObjOrName) {
   const companyName = typeof companyObjOrName === 'string' 
     ? companyObjOrName 

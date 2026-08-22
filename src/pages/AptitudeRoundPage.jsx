@@ -81,11 +81,16 @@ export default function AptitudeRoundPage() {
   const fetchAptitudeQuestions = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'aptitudeQuestions'));
-      let fetched = [];
-      if (!snap.empty) {
-        fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      } else {
+      let fetched = INITIAL_APTITUDE_QUESTIONS;
+      try {
+        if (db) {
+          const snap = await getDocs(collection(db, 'aptitudeQuestions'));
+          if (snap && !snap.empty) {
+            fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          }
+        }
+      } catch (firestoreErr) {
+        console.warn('[AptitudeRoundPage] Firestore read notice, using initial dataset:', firestoreErr.message);
         fetched = INITIAL_APTITUDE_QUESTIONS;
       }
 

@@ -76,14 +76,20 @@ export default function RecommendationsPage() {
     setErrorNotice('');
 
     try {
-      // Step 1: Fetch Course Catalog from Firestore
-      const snap = await getDocs(collection(db, 'courseCatalog'));
-      let catalogPool = [];
-      if (!snap.empty) {
-        catalogPool = snap.docs.map(d => ({ catalogId: d.id, ...d.data() }));
-      } else {
+      // Step 1: Fetch Course Catalog from Firestore with resilient in-memory fallback
+      let catalogPool = INITIAL_COURSE_CATALOG;
+      try {
+        if (db) {
+          const snap = await getDocs(collection(db, 'courseCatalog'));
+          if (snap && !snap.empty) {
+            catalogPool = snap.docs.map(d => ({ catalogId: d.id, ...d.data() }));
+          } else {
+            seedCourseCatalogInFirestore().catch(() => {});
+          }
+        }
+      } catch (firestoreErr) {
+        console.warn('[RecommendationsPage] Firestore catalog read notice, using initial catalog:', firestoreErr.message);
         catalogPool = INITIAL_COURSE_CATALOG;
-        seedCourseCatalogInFirestore();
       }
 
       setCatalogItems(catalogPool);
