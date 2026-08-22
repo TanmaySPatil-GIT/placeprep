@@ -202,6 +202,8 @@ export function evaluateDecisionEngine(evaluatorOutput = {}, sessionState = {}, 
   };
 }
 
+import { INITIAL_INTERVIEW_RUBRICS } from '../utils/seedInterviewRubrics.js';
+
 /**
  * State Updater based on Decision Engine output
  */
@@ -216,12 +218,43 @@ export function applyDecisionToState(sessionState, decisionResult) {
       currentTopicObj.status = 'completed';
     }
 
-    const nextTopicObj = updated.topicPlan.find(t => t.status === 'not_started');
+    // STRICTLY filter OUT topics with status 'completed'
+    let nextTopicObj = updated.topicPlan.find(t => t.status === 'not_started');
+
+    if (!nextTopicObj) {
+      // Dynamic topic pool expansion if all initially planned topics have been completed
+      const existingIds = updated.topicPlan.map(t => t.topicId);
+      const isHr = updated.roundType === 'hr';
+      const candidateRubrics = INITIAL_INTERVIEW_RUBRICS.filter(r => 
+        (isHr ? r.topicId.startsWith('behavioral-') : !r.topicId.startsWith('behavioral-')) &&
+        !existingIds.includes(r.topicId)
+      );
+
+      if (candidateRubrics.length > 0) {
+        const extraRubric = candidateRubrics[0];
+        nextTopicObj = {
+          topicId: extraRubric.topicId,
+          topicName: extraRubric.topicName,
+          status: 'in_progress',
+          mastery: null
+        };
+        updated.topicPlan.push(nextTopicObj);
+      }
+    }
+
     if (nextTopicObj) {
       nextTopicObj.status = 'in_progress';
       updated.currentTopicId = nextTopicObj.topicId;
     }
     updated.currentDepth = 0;
+
+    console.log('[DecisionEngine: Topic Advancement Evaluated]', {
+      currentTopicId: updated.currentTopicId,
+      completedTopics: updated.topicPlan.filter(t => t.status === 'completed').map(t => t.topicId),
+      remainingTopics: updated.topicPlan.filter(t => t.status === 'not_started').map(t => t.topicId),
+      topicPlan: updated.topicPlan.map(t => `${t.topicId}:${t.status}`)
+    });
+
   } else {
     // If not advancing, increment probing depth
     if (!decisionResult.isNavigation) {

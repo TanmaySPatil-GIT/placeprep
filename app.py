@@ -927,6 +927,66 @@ RUBRIC_DATABASE = {
             'Arbitrarily dropping tasks without aligning with leads'
         ]
     },
+    'behavioral-motivation-company': {
+        'topicId': 'behavioral-motivation-company',
+        'topicName': 'Behavioral - Company Culture, Values & Role Alignment',
+        'keyConcepts': [
+            'Connecting personal career goals to specific engineering products and company mission',
+            'Articulating familiarity with core cultural values with concrete examples',
+            'Explaining unique value and perspective brought to the team',
+            'Demonstrating genuine curiosity about team architecture and practices'
+        ],
+        'commonMisconceptions': [
+            'Giving generic flattery without citing specific projects, tech stack, or values',
+            'Focusing exclusively on compensation, brand prestige, or perks',
+            'Showing zero knowledge of company domain or products'
+        ]
+    },
+    'behavioral-strengths-self-awareness': {
+        'topicId': 'behavioral-strengths-self-awareness',
+        'topicName': 'Behavioral - Self-Awareness, Strengths & Growth Areas',
+        'keyConcepts': [
+            'Framing strengths with tangible evidence and technical metrics',
+            'Discussing genuine developmental areas with concrete steps being taken',
+            'Demonstrating a growth mindset by seeking critique as actionable insight',
+            'Balancing confidence with humility and willingness to learn'
+        ],
+        'commonMisconceptions': [
+            'Disguising a strength as a fake weakness',
+            'Denying having any technical or communication weaknesses',
+            'Listing a fatal core weakness without showing any mitigation'
+        ]
+    },
+    'behavioral-leadership-mentorship': {
+        'topicId': 'behavioral-leadership-mentorship',
+        'topicName': 'Behavioral - Leadership, Initiative & Mentorship',
+        'keyConcepts': [
+            'Taking initiative to solve unassigned pain points or improve developer tooling',
+            'Mentoring junior engineers and conducting constructive code reviews',
+            'Rallying cross-functional consensus around technical proposals',
+            'Leading by influence and data rather than formal managerial authority'
+        ],
+        'commonMisconceptions': [
+            'Believing leadership requires an official manager title',
+            'Focusing solely on individual code output while ignoring team enablement',
+            'Dictating decisions without soliciting feedback'
+        ]
+    },
+    'behavioral-ethics-integrity': {
+        'topicId': 'behavioral-ethics-integrity',
+        'topicName': 'Behavioral - Ethics, Integrity & Difficult Choices',
+        'keyConcepts': [
+            'Upholding user privacy, data security, and compliance under business pressure',
+            'Transparently raising red flags regarding system vulnerabilities or flawed metrics',
+            'Respecting intellectual property and confidential information',
+            'Balancing urgency with rigorous ethical and engineering standards'
+        ],
+        'commonMisconceptions': [
+            'Ignoring known security or privacy risks to hit a deadline',
+            'Blaming external constraints for compromising software integrity',
+            'Thinking ethics is only relevant for legal departments'
+        ]
+    },
     'devops-cicd-iac': {
         'topicId': 'devops-cicd-iac',
         'topicName': 'DevOps - CI/CD Pipelines & Infrastructure as Code',
@@ -1305,8 +1365,17 @@ def generate_question():
     round_type = session_override.get('roundType', 'technical') if isinstance(session_override, dict) else 'technical'
     history_summary = session_override.get('historySummary', '') if isinstance(session_override, dict) else ''
     recent_turns = session_override.get('recentTurns', []) if isinstance(session_override, dict) else []
+    
+    # Collect all questions asked so far across session
+    asked_questions = list(session_override.get('askedQuestions', [])) if isinstance(session_override, dict) else []
+    eval_log = session_override.get('evaluationLog', []) if isinstance(session_override, dict) else []
+    for entry in eval_log:
+        q_text = entry.get('question', '').strip()
+        if q_text and q_text not in asked_questions:
+            asked_questions.append(q_text)
 
     recent_formatted = "\n".join([f"{t.get('role', '').capitalize()}: \"{t.get('text', '')}\"" for t in recent_turns[-6:]]) if recent_turns else "None"
+    asked_formatted = "\n".join([f"- \"{q}\"" for q in asked_questions[-10:]]) if asked_questions else "None (First Question)"
 
     concepts_correct = evaluator_output.get('conceptsCorrect', [])
     concepts_wrong = evaluator_output.get('conceptsWrong', [])
@@ -1334,6 +1403,9 @@ CONVERSATION HISTORY SUMMARY: {history_summary or 'None'}
 RECENT TURNS:
 {recent_formatted}
 
+PREVIOUSLY ASKED QUESTIONS IN THIS SESSION (DO NOT REPEAT OR RE-ASK ANY OF THESE):
+{asked_formatted}
+
 GENERATION INSTRUCTIONS FOR THIS TURN:
 Ask ONE natural, conversational turn that:
 1. Directly references what the student just said — never ignore their actual response.
@@ -1344,6 +1416,7 @@ Ask ONE natural, conversational turn that:
 6. If strategy is to move to a new topic (e.g. "increase_difficulty_or_new_topic" or "move_to_next_topic"): transition naturally to the new topic ({topic_name}) rather than abruptly.
 7. If strategy is "simplify_or_hint": provide a gentle hint or simplify the question to help them get started.
 8. Keep it to 1-2 concise, spoken sentences. Speak like a real interviewer, not a quiz reading out loud.
+9. CRITICAL ANTI-REPETITION RULE: You MUST NOT ask any question that has already been asked in PREVIOUSLY ASKED QUESTIONS. Explore a completely fresh question or scenario on {topic_name}.
 
 Return ONLY valid raw JSON with NO code blocks:
 {{
@@ -1360,19 +1433,40 @@ Return ONLY valid raw JSON with NO code blocks:
         except Exception as e:
             print(f"Gemini API Exception in generate_question: {e}")
 
-    if not gen_resp or not isinstance(gen_resp, dict) or 'interviewerResponse' not in gen_resp:
+    # Helper function to check duplicate against asked questions
+    def is_duplicate_text(candidate):
+        if not candidate:
+            return True
+        c_words = set(re.sub(r'[^a-zA-Z0-9\s]', '', candidate.lower()).split())
+        c_words = {w for w in c_words if len(w) > 3}
+        if not c_words:
+            return False
+        for prev_q in asked_questions:
+            p_words = set(re.sub(r'[^a-zA-Z0-9\s]', '', prev_q.lower()).split())
+            p_words = {w for w in p_words if len(w) > 3}
+            if not p_words:
+                continue
+            common = len(c_words.intersection(p_words))
+            overlap = common / max(1, min(len(c_words), len(p_words)))
+            if overlap >= 0.75:
+                return True
+        return False
+
+    candidate_text = gen_resp.get('interviewerResponse', '') if isinstance(gen_resp, dict) else ''
+
+    if not candidate_text or is_duplicate_text(candidate_text):
         if strategy == 'repeat_question':
             resp = "Could you please elaborate on your previous answer? I'd love to hear your thoughts again."
         elif strategy == 'simplify_question':
-            resp = f"Let's simplify that: in plain terms, how would you explain the core idea of {topic_name}?"
+            resp = f"Let's break that down: in plain terms, how would you approach the core concept of {topic_name}?"
         elif strategy == 'guiding_question_no_reveal':
-            resp = f"That's an interesting perspective. Think carefully about how {topic_name} handles edge cases—can you reconsider your assumption?"
+            resp = f"That's an interesting perspective. Think carefully about how {topic_name} behaves in practice—what trade-offs might you encounter?"
         elif strategy in ['increase_difficulty_or_new_topic', 'move_to_next_topic']:
-            resp = f"Great work on that! Now, let's transition to our next key area: {topic_name}. How would you approach it?"
+            resp = f"Good discussion on that. Let's move to our next area: {topic_name}. How have you handled this in your projects?"
         elif strategy == 'simplify_or_hint':
-            resp = f"No worries at all! Here's a quick hint regarding {topic_name}: consider how data flows between components. What comes to mind now?"
+            resp = f"No worries at all! Here's a quick thought regarding {topic_name}: think about practical scenarios you've seen. What comes to mind?"
         else:
-            resp = f"Good point on the initial concept! Building on that, how would you address the missing nuance in {topic_name}?"
+            resp = f"Good point on the initial concept! Building on that, how would you address {topic_name} in a team setting?"
 
         gen_resp = {
             "interviewerResponse": resp

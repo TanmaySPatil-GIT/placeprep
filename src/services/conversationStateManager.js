@@ -43,7 +43,9 @@ function buildTopicPlanSync(selectedField, roundType) {
   if (filtered.length < 3) filtered = INITIAL_INTERVIEW_RUBRICS;
 
   const shuffled = [...filtered].sort(() => 0.5 - Math.random());
-  const selected = shuffled.slice(0, Math.min(5, Math.max(3, shuffled.length)));
+  // For HR rounds, provide up to 8 topics to cover full 8-turn interview sessions
+  const maxTopics = roundType === 'hr' ? Math.min(8, shuffled.length) : Math.min(6, Math.max(4, shuffled.length));
+  const selected = shuffled.slice(0, maxTopics);
 
   return selected.map((t, idx) => ({
     topicId: t.topicId,
@@ -82,6 +84,7 @@ export async function initializeInterviewSession({
     difficultyLevel: difficultyLevel.toLowerCase(),
     historySummary: '',
     recentTurns: [],
+    askedQuestions: [],
     weakSignals: [],
     strongSignals: [],
     evaluationLog: [],
@@ -89,11 +92,10 @@ export async function initializeInterviewSession({
     updatedAt: new Date().toISOString()
   };
 
-  console.log('[ConversationStateManager] Session built. Topics:', topicPlan.map(t => t.topicId));
+  // Background Firestore save (non-blocking)
+  firestoreSaveAsync('interviewSessions', finalSessionId, initialSession);
 
-  // Fire-and-forget Firestore write — never blocks the caller
-  firestoreSaveAsync('interviewSessions', finalSessionId, initialSession, false);
-
+  console.log('[ConversationStateManager] Session built. Topics:', topicPlan.map(t => `${t.topicId} (${t.status})`));
   return initialSession;
 }
 
@@ -147,18 +149,30 @@ export async function updateStateAfterTurn(sessionId, {
   // Deep clone session object
   const updatedSession = JSON.parse(JSON.stringify(session));
 
-  // A. Append to recentTurns
-  if (question) {
-    updatedSession.recentTurns.push({ role: 'interviewer', text: question });
+  // Initialize tracking collections if not present
+  updatedSession.askedQuestions = updatedSession.askedQuestions || [];
+  updatedSession.recentTurns = updatedSession.recentTurns || [];
+  updatedSession.evaluationLog = updatedSession.evaluationLog || [];
+  updatedSession.strongSignals = updatedSession.strongSignals || [];
+  updatedSession.weakSignals = updatedSession.weakSignals || [];
+
+  // A. Append to recentTurns and track in askedQuestions history
+  if (question && question.trim()) {
+    const trimmedQ = question.trim();
+    updatedSession.recentTurns.push({ role: 'interviewer', text: trimmedQ });
+    if (!updatedSession.askedQuestions.includes(trimmedQ)) {
+      updatedSession.askedQuestions.push(trimmedQ);
+    }
   }
-  if (studentAnswer) {
-    updatedSession.recentTurns.push({ role: 'student', text: studentAnswer });
+  if (studentAnswer && studentAnswer.trim()) {
+    updatedSession.recentTurns.push({ role: 'student', text: studentAnswer.trim() });
   }
 
   // B. Append evaluator output to evaluationLog
   const turnIndex = updatedSession.evaluationLog.length + 1;
   const evalLogEntry = {
     turnIndex,
+    topicId: updatedSession.currentTopicId,
     question: question || '',
     studentAnswer: studentAnswer || '',
     score: evaluatorOutput.score ?? 75,
@@ -199,7 +213,7 @@ export async function updateStateAfterTurn(sessionId, {
 
   // E. Apply Strategy Results to Topic Plan, Depth, & Difficulty Level
   if (decision.topicAdvance) {
-    // Find current topic in topicPlan and mark completed
+    // Find current topic in topicPlan and mark strictly completed
     const currentTopicObj = updatedSession.topicPlan.find(t => t.topicId === updatedSession.currentTopicId);
     if (currentTopicObj) {
       currentTopicObj.status = 'completed';
@@ -232,18 +246,51 @@ export async function updateStateAfterTurn(sessionId, {
       updatedSession.historySummary = (updatedSession.historySummary || '') + summaryLine;
     }
 
-    // Clear raw turns from recentTurns for completed topic to keep token count and latency bounded
+    // Clear raw turns from recentTurns for completed topic to keep token count bounded
     updatedSession.recentTurns = [];
 
-    // Find next untouched topic
-    const nextTopic = updatedSession.topicPlan.find(t => t.status === 'not_started');
+    // Find next untouched topic — STRICTLY filter OUT completed topics
+    let nextTopic = updatedSession.topicPlan.find(t => t.status === 'not_started');
+
+    if (!nextTopic) {
+      // Dynamic topic pool expansion if all initially planned topics have been completed
+      const existingIds = updatedSession.topicPlan.map(t => t.topicId);
+      const isHr = updatedSession.roundType === 'hr';
+      const candidateRubrics = INITIAL_INTERVIEW_RUBRICS.filter(r => 
+        (isHr ? r.topicId.startsWith('behavioral-') : !r.topicId.startsWith('behavioral-')) &&
+        !existingIds.includes(r.topicId)
+      );
+
+      if (candidateRubrics.length > 0) {
+        const extraRubric = candidateRubrics[0];
+        nextTopic = {
+          topicId: extraRubric.topicId,
+          topicName: extraRubric.topicName,
+          status: 'in_progress',
+          mastery: null
+        };
+        updatedSession.topicPlan.push(nextTopic);
+        console.log(`[ConversationStateManager: Dynamic Topic Expansion] Appended unvisited rubric: ${extraRubric.topicId}`);
+      }
+    }
+
     if (nextTopic) {
       nextTopic.status = 'in_progress';
       updatedSession.currentTopicId = nextTopic.topicId;
       updatedSession.currentDepth = 0;
+      console.log(`[ConversationStateManager: Topic Advancement] Switched to new topic: ${nextTopic.topicId} (${nextTopic.topicName})`);
     } else {
-      console.log('[ConversationStateManager] All topics in plan completed!');
+      console.log('[ConversationStateManager: Topic Advancement] All available topics in rubric bank completed for this session!');
     }
+
+    console.log('[Decision Engine: Topic Plan State]', {
+      currentTopicId: updatedSession.currentTopicId,
+      completedTopics: updatedSession.topicPlan.filter(t => t.status === 'completed').map(t => t.topicId),
+      remainingTopics: updatedSession.topicPlan.filter(t => t.status === 'not_started').map(t => t.topicId),
+      totalAskedQuestionsCount: updatedSession.askedQuestions.length,
+      topicPlan: updatedSession.topicPlan.map(t => `${t.topicId} (${t.status})`)
+    });
+
   } else if (!decision.isNavigation) {
     // Increment depth on current topic unless it was a navigation intent
     updatedSession.currentDepth = (updatedSession.currentDepth || 0) + 1;

@@ -613,7 +613,40 @@ export default function HrInterviewRoundPage() {
               setTopicFollowupCount(prev => prev + 1);
             }
 
-            const nextText = backendNextQ;
+            let nextText = backendNextQ;
+
+            // Anti-Repetition Safeguard: Check if nextText is a duplicate of any previously asked question
+            const isDuplicate = (candidateText) => {
+              if (!candidateText) return true;
+              const normCandidate = candidateText.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+              return askedQuestionsHistory.some(prevQ => {
+                const normPrev = prevQ.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+                if (normPrev === normCandidate) return true;
+                const words1 = new Set(normCandidate.split(/\s+/).filter(w => w.length > 3));
+                const words2 = new Set(normPrev.split(/\s+/).filter(w => w.length > 3));
+                if (words1.size === 0 || words2.size === 0) return false;
+                let matchCount = 0;
+                for (const w of words1) {
+                  if (words2.has(w)) matchCount++;
+                }
+                const overlap = matchCount / Math.min(words1.size, words2.size);
+                return overlap > 0.75;
+              });
+            };
+
+            if (isDuplicate(nextText)) {
+              console.warn('[Anti-Repetition Safeguard: HR] Detected duplicate question from generator:', nextText);
+              const unusedFromBank = questionsBank.find(q => !isDuplicate(q.question));
+              if (unusedFromBank) {
+                nextText = unusedFromBank.question;
+                console.log('[Anti-Repetition Safeguard: HR] Substituted with fresh question from question bank:', nextText);
+              } else {
+                const unusedInitial = INITIAL_HR_QUESTIONS.find(q => !isDuplicate(q.question));
+                nextText = unusedInitial ? unusedInitial.question : `Let's discuss another key aspect of your engineering background. What is a complex project milestone you recently delivered?`;
+                console.log('[Anti-Repetition Safeguard: HR] Substituted with fresh fallback question:', nextText);
+              }
+            }
+
             console.log('[HrInterviewRoundPage] [setState START] setCurrentSpokenQuestion:', nextText);
             setCurrentSpokenQuestion(nextText);
             setConversationHistory(prev => [...prev, { role: 'interviewer', text: nextText }]);

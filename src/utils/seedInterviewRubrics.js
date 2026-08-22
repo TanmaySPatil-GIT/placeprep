@@ -486,6 +486,82 @@ export const INITIAL_INTERVIEW_RUBRICS = [
     difficultyLevel: 'Easy',
     sampleQuestion: 'How do you prioritize your work when faced with multiple urgent tasks and tight deadlines? Give a specific real-world example.'
   },
+  {
+    topicId: 'behavioral-motivation-company',
+    topicName: 'Behavioral - Company Culture, Values & Role Alignment',
+    fieldIds: ['sde', 'qa-testing', 'data-science', 'ml-ai', 'devops-cloud', 'cybersecurity', 'ui-ux', 'pm', 'mobile-dev', 'business-analyst'],
+    companiesRelevant: ['Google', 'Amazon', 'Microsoft', 'Meta', 'Netflix', 'TCS', 'Infosys'],
+    keyConcepts: [
+      'Connecting personal career goals to specific engineering products, technical challenges, or mission of the target company',
+      'Articulating familiarity with core cultural values and demonstrating concrete examples of living those values',
+      'Explaining why this role fits your career trajectory and what unique perspective you bring to the team',
+      'Demonstrating genuine curiosity about team architecture, roadmaps, and day-to-day engineering practices'
+    ],
+    commonMisconceptions: [
+      'Giving generic flattery ("you are a big company") without citing specific projects, tech stack, or values',
+      'Focusing exclusively on compensation, brand prestige, or perks rather than meaningful engineering contributions',
+      'Showing zero knowledge of what the company actually builds or the domain it operates in'
+    ],
+    difficultyLevel: 'Easy',
+    sampleQuestion: 'Why do you want to join our engineering team specifically, and which of our company values or products resonates most with your working style?'
+  },
+  {
+    topicId: 'behavioral-strengths-self-awareness',
+    topicName: 'Behavioral - Self-Awareness, Strengths & Growth Areas',
+    fieldIds: ['sde', 'qa-testing', 'data-science', 'ml-ai', 'devops-cloud', 'cybersecurity', 'ui-ux', 'pm', 'mobile-dev', 'business-analyst'],
+    companiesRelevant: ['Google', 'Amazon', 'Microsoft', 'Adobe', 'Flipkart'],
+    keyConcepts: [
+      'Framing strengths with tangible evidence, technical metrics, or peer feedback',
+      'Discussing genuine developmental areas with concrete steps currently being taken to improve',
+      'Demonstrating a growth mindset by seeking feedback and viewing critique as actionable insight',
+      'Balancing technical confidence with humility and willingness to learn from junior or senior colleagues'
+    ],
+    commonMisconceptions: [
+      'Disguising a strength as a fake weakness (e.g. "I am a perfectionist who works too hard")',
+      'Denying having any technical or communication weaknesses',
+      'Listing a weakness critical to the fundamental core of the role without showing any mitigation strategy'
+    ],
+    difficultyLevel: 'Easy',
+    sampleQuestion: 'What do you consider your greatest professional strength, and what is one real technical or soft skill area you are actively working to improve?'
+  },
+  {
+    topicId: 'behavioral-leadership-mentorship',
+    topicName: 'Behavioral - Leadership, Initiative & Mentorship',
+    fieldIds: ['sde', 'qa-testing', 'data-science', 'ml-ai', 'devops-cloud', 'cybersecurity', 'ui-ux', 'pm', 'mobile-dev', 'business-analyst'],
+    companiesRelevant: ['Google', 'Amazon', 'Microsoft', 'Uber', 'Atlassian'],
+    keyConcepts: [
+      'Taking initiative to solve unassigned pain points, improve developer tooling, or refactor brittle codebases',
+      'Mentoring junior engineers, conducting constructive code reviews, or writing clear documentation',
+      'Rallying cross-functional consensus around technical RFCs and architecture proposals',
+      'Leading by influence and data rather than formal managerial authority'
+    ],
+    commonMisconceptions: [
+      'Believing you can only demonstrate leadership if you hold an official "Lead" or "Manager" title',
+      'Focusing solely on individual code output while ignoring team enablement and shared success',
+      'Dictating decisions to teammates without soliciting their feedback or addressing their concerns'
+    ],
+    difficultyLevel: 'Medium',
+    sampleQuestion: 'Tell me about a time you took the initiative to drive a project forward, improve a team process, or mentor a peer who was struggling.'
+  },
+  {
+    topicId: 'behavioral-ethics-integrity',
+    topicName: 'Behavioral - Ethics, Integrity & Difficult Choices',
+    fieldIds: ['sde', 'qa-testing', 'data-science', 'ml-ai', 'devops-cloud', 'cybersecurity', 'ui-ux', 'pm', 'mobile-dev', 'business-analyst'],
+    companiesRelevant: ['Google', 'Amazon', 'Microsoft', 'Goldman Sachs', 'Apple'],
+    keyConcepts: [
+      'Upholding user privacy, data security, and compliance even under tight business pressure to cut corners',
+      'Transparently raising red flags regarding system vulnerabilities, flawed metrics, or misleading benchmarks',
+      'Respecting intellectual property, licensing, and confidential company information',
+      'Balancing business urgency with rigorous ethical standards and sound engineering integrity'
+    ],
+    commonMisconceptions: [
+      'Ignoring a known security or privacy risk to hit a sprint deadline without informing leadership',
+      'Blaming external constraints or manager pressure for compromising software integrity',
+      'Thinking ethics is only relevant for legal departments rather than everyday software engineering'
+    ],
+    difficultyLevel: 'Medium',
+    sampleQuestion: 'Describe a situation where you faced an ethical dilemma or pressure to compromise on security/quality to meet a deadline. How did you handle it?'
+  },
 
   // ==========================================
   // DEVOPS & CYBERSECURITY
