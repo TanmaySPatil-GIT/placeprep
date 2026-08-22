@@ -126,12 +126,17 @@ export default function ResultsPage() {
       } : null
     };
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
     try {
       const response = await fetch(FLASK_FEEDBACK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(fetchTimeout);
 
       if (!response.ok) {
         throw new Error(`Flask API response HTTP ${response.status}`);
@@ -140,6 +145,7 @@ export default function ResultsPage() {
       const data = await response.json();
       setAiFeedback(data);
     } catch (err) {
+      clearTimeout(fetchTimeout);
       console.warn('Flask backend feedback notice:', err.message);
       
       // Dynamic company-tailored fallback feedback

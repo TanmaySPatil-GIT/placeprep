@@ -158,6 +158,9 @@ export default function NegotiationRoundPage() {
 
     const FLASK_NEGOTIATION_URL = `${getBackendUrl()}/api/negotiation-response`;
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
     try {
       const response = await fetch(FLASK_NEGOTIATION_URL, {
         method: 'POST',
@@ -171,8 +174,10 @@ export default function NegotiationRoundPage() {
           offerDetails,
           conversationHistory: updatedHistory,
           selectedLanguage: selectedLanguage?.name || 'English'
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(fetchTimeout);
 
       if (response.ok) {
         const data = await response.json();
@@ -208,6 +213,7 @@ export default function NegotiationRoundPage() {
         triggerAISpeech(hrReply);
       }
     } catch (err) {
+      clearTimeout(fetchTimeout);
       console.warn('Negotiation endpoint notice:', err);
       const fallbackReply = `Thank you for bringing this up. We value your skills and can adjust the signing bonus to ₹3.0 LPA to help welcome you to ${companyName}.`;
       setCurrentSpokenText(fallbackReply);
@@ -218,7 +224,7 @@ export default function NegotiationRoundPage() {
         setIsComplete(true);
       }
     } finally {
-      if (aiState !== 'speaking') setAiState('idle');
+      setAiState('idle');
     }
   };
 

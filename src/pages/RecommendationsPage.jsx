@@ -107,11 +107,16 @@ export default function RecommendationsPage() {
         catalogSubset: candidateCatalog
       };
 
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch(FLASK_RECS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      clearTimeout(fetchTimeout);
 
       if (!response.ok) {
         throw new Error(`Flask API response HTTP ${response.status}`);

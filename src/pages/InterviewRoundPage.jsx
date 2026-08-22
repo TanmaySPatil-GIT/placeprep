@@ -495,60 +495,65 @@ export default function InterviewRoundPage() {
     setConversationHistory([]);
     setAiState('thinking');
 
-    let initSession = null;
     try {
-      console.log('[OpeningTurn Debug: TECHNICAL] 2. Awaiting initializeInterviewSession...');
-      const sessionPromise = initializeInterviewSession({
-        userId: userProfile?.uid || 'user_anon',
-        selectedCompany: companyName,
-        selectedField: targetFieldId || 'sde',
-        roundType: 'technical',
-        difficultyLevel: difficultyLevel || 'medium'
-      });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
-      );
-      initSession = await Promise.race([sessionPromise, timeoutPromise]);
-      console.log('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
-      setSessionState(initSession);
-      sessionStateRef.current = initSession;
+      let initSession = null;
+      try {
+        console.log('[OpeningTurn Debug: TECHNICAL] 2. Awaiting initializeInterviewSession...');
+        const sessionPromise = initializeInterviewSession({
+          userId: userProfile?.uid || 'user_anon',
+          selectedCompany: companyName,
+          selectedField: targetFieldId || 'sde',
+          roundType: 'technical',
+          difficultyLevel: difficultyLevel || 'medium'
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
+        );
+        initSession = await Promise.race([sessionPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
+        setSessionState(initSession);
+        sessionStateRef.current = initSession;
+      } catch (err) {
+        console.warn('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession notice:', err.message);
+      }
+
+      let openingText = null;
+      try {
+        console.log('[OpeningTurn Debug: TECHNICAL] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
+        const openingPromise = executeOpeningTurn({
+          sessionState: initSession,
+          roundType: 'technical',
+          backendUrl: getBackendUrl()
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
+        );
+        openingText = await Promise.race([openingPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn completed. Opening text:', openingText);
+      } catch (opErr) {
+        console.warn('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn notice:', opErr.message);
+      }
+
+      if (!openingText) {
+        console.log('[OpeningTurn Debug: TECHNICAL] 6. Using initial fallback opening question.');
+        const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
+        const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
+        openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
+      }
+
+      console.log('[OpeningTurn Debug: TECHNICAL] 7. Setting opening question and resetting aiState to idle.');
+      setCurrentSpokenQuestion(openingText);
+      setCurrentBasedOn(`${companyName} Technical Assessment`);
+      setConversationHistory([{ role: 'interviewer', text: openingText }]);
+
+      setTimeout(() => {
+        triggerAISpeech(openingText);
+      }, 500);
     } catch (err) {
-      console.warn('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession notice:', err.message);
+      console.error('[InterviewRoundPage:Tech] Error starting technical session:', err);
+    } finally {
+      setAiState('idle');
     }
-
-    let openingText = null;
-    try {
-      console.log('[OpeningTurn Debug: TECHNICAL] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
-      const openingPromise = executeOpeningTurn({
-        sessionState: initSession,
-        roundType: 'technical',
-        backendUrl: getBackendUrl()
-      });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
-      );
-      openingText = await Promise.race([openingPromise, timeoutPromise]);
-      console.log('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn completed. Opening text:', openingText);
-    } catch (opErr) {
-      console.warn('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn notice:', opErr.message);
-    }
-
-    if (!openingText) {
-      console.log('[OpeningTurn Debug: TECHNICAL] 6. Using initial fallback opening question.');
-      const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
-      const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
-      openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
-    }
-
-    console.log('[OpeningTurn Debug: TECHNICAL] 7. Setting opening question and resetting aiState to idle.');
-    setCurrentSpokenQuestion(openingText);
-    setCurrentBasedOn(`${companyName} Technical Assessment`);
-    setConversationHistory([{ role: 'interviewer', text: openingText }]);
-    setAiState('idle');
-
-    setTimeout(() => {
-      triggerAISpeech(openingText);
-    }, 500);
   };
 
   // Restart Interview Session (Triggers fresh shuffle & recent question exclusion)

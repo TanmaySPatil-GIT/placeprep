@@ -324,12 +324,17 @@ export default function FinalReportPage() {
     }
   };
 
+  const [reportError, setReportError] = useState(null);
+
   // Generate Report via Flask API if not read-only
   useEffect(() => {
     if (readOnlyReport) return;
 
     const generateReport = async () => {
+      console.log('[FinalReportPage] [setState START] setLoading(true)');
       setLoading(true);
+      setReportError(null);
+      console.log('[FinalReportPage] [setState COMPLETE] loading=true');
 
       const FLASK_URL = `${getBackendUrl()}/api/generate-final-report`;
 
@@ -352,48 +357,57 @@ export default function FinalReportPage() {
         hrResults: hrInterviewResult
       };
 
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
       try {
+        console.log('[FinalReportPage] [API: /api/generate-final-report CALLING] Payload:', payload);
         const response = await fetch(FLASK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: controller.signal
         });
+        clearTimeout(fetchTimeout);
 
         if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
         const generated = await response.json();
+        console.log('[FinalReportPage] [API: /api/generate-final-report RESOLVED 200] Data:', generated);
 
+        console.log('[FinalReportPage] [setState START] setReport(generated)');
         setReport(generated);
+        console.log('[FinalReportPage] [setState COMPLETE] report state updated with AI evaluation');
 
-        // Save report to Firestore for authenticated user
+        // Save report to Firestore in background (non-blocking for UI)
         if (auth.currentUser) {
-          try {
-            const docRef = await addDoc(collection(db, 'reports'), {
-              userId: auth.currentUser.uid,
-              userName: currentUser.displayName || `User${auth.currentUser.uid.slice(0, 4)}`,
-              company: companyName,
-              field: fieldName,
-              difficultyLevel: activeDifficulty,
-              experienceLevel: activeExpLevel,
-              experienceYears: activeExpYears,
-              readinessScore: generated.readinessScore,
-              readinessLabel: generated.readinessLabel,
-              publicLeaderboard: true,
-              executiveSummary: generated.executiveSummary,
-              roundBreakdown: generated.roundBreakdown,
-              topPriorityActions: generated.topPriorityActions,
-              encouragingClosingNote: generated.encouragingClosingNote,
-              timestamp: new Date().toISOString(),
-              date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-            });
+          addDoc(collection(db, 'reports'), {
+            userId: auth.currentUser.uid,
+            userName: currentUser.displayName || `User${auth.currentUser.uid.slice(0, 4)}`,
+            company: companyName,
+            field: fieldName,
+            difficultyLevel: activeDifficulty,
+            experienceLevel: activeExpLevel,
+            experienceYears: activeExpYears,
+            readinessScore: generated.readinessScore,
+            readinessLabel: generated.readinessLabel,
+            publicLeaderboard: true,
+            executiveSummary: generated.executiveSummary,
+            roundBreakdown: generated.roundBreakdown,
+            topPriorityActions: generated.topPriorityActions,
+            encouragingClosingNote: generated.encouragingClosingNote,
+            timestamp: new Date().toISOString(),
+            date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          }).then((docRef) => {
             setSavedReportDocId(docRef.id);
             fetchLeaderboard();
-          } catch (fsErr) {
-            console.warn('Firestore report save notice:', fsErr.message);
-          }
+          }).catch((fsErr) => {
+            console.warn('[FinalReportPage] Firestore report save notice:', fsErr.message);
+          });
         }
 
       } catch (err) {
-        console.warn('Final report API notice:', err.message);
+        clearTimeout(fetchTimeout);
+        console.warn('[FinalReportPage] Final report API notice/error:', err.message);
         
         // Dynamically compute authentic scores from actual context data
         const roundBreakdown = [];
@@ -437,10 +451,10 @@ export default function FinalReportPage() {
           attemptedScores.push(sdScoreVal);
         }
 
-        const hrScoreVal = hrInterviewResult?.score ?? technicalInterviewResult?.score;
+        const hrScoreVal = hrInterviewResult?.score;
         if (typeof hrScoreVal === 'number') {
           roundBreakdown.push({
-            roundName: "Stage 6: Technical AI Mock Interview",
+            roundName: "Stage 6: HR AI Mock Interview",
             score: hrScoreVal,
             oneLineTakeaway: `Interview telemetry score: ${hrScoreVal}%.`
           });
@@ -470,9 +484,13 @@ export default function FinalReportPage() {
             : `Welcome to Placement Prep! Start with your first round to generate your personalized diagnostic report.`
         };
 
+        console.log('[FinalReportPage] [setState START] setReport(fallback)');
         setReport(fallback);
+        console.log('[FinalReportPage] [setState COMPLETE] report state populated with authentic context fallback');
       } finally {
+        console.log('[FinalReportPage] [setState START] setLoading(false)');
         setLoading(false);
+        console.log('[FinalReportPage] [setState COMPLETE] loading reset to false');
       }
     };
 
@@ -599,12 +617,12 @@ export default function FinalReportPage() {
               {/* Executive Summary */}
               <div className="md:col-span-2 space-y-3">
                 <div className="inline-block px-3.5 py-1 rounded-full bg-gold-100 border border-gold-200 text-gold-600 text-xs font-extrabold font-serif shadow-warm-sm">
-                  {report.readinessLabel || 'Placement Ready Candidate'}
+                  {report?.readinessLabel || 'Placement Ready Candidate'}
                 </div>
                 
                 <h3 className="text-lg font-bold font-serif text-darkcharcoal-900">Executive Performance Evaluation</h3>
                 <p className="text-xs text-darkcharcoal-700 leading-relaxed font-sans bg-white p-4 rounded-2xl border border-warmborder shadow-warm-sm">
-                  {report.executiveSummary}
+                  {report?.executiveSummary}
                 </p>
               </div>
 
@@ -1078,7 +1096,7 @@ export default function FinalReportPage() {
             </div>
 
             {/* Topic-Wise Mastery Scores (Derived directly from evaluationLog) */}
-            {report.topicMastery && report.topicMastery.length > 0 && (
+            {report?.topicMastery && report.topicMastery.length > 0 && (
               <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between border-b border-warmborder pb-2">
                   <div className="flex items-center gap-2 text-base font-bold font-serif text-darkcharcoal-900">
@@ -1086,7 +1104,7 @@ export default function FinalReportPage() {
                     <span>Topic-Wise Mastery Scores (Interview Evaluation Log)</span>
                   </div>
                   <span className="text-xs text-darkcharcoal-500 font-mono">
-                    {report.totalTurnsEvaluated || 0} Total Turns Evaluated
+                    {report?.totalTurnsEvaluated || 0} Total Turns Evaluated
                   </span>
                 </div>
 
@@ -1134,7 +1152,7 @@ export default function FinalReportPage() {
             )}
 
             {/* Consolidated Misconceptions Across Session */}
-            {report.consolidatedMisconceptions && report.consolidatedMisconceptions.length > 0 && (
+            {report?.consolidatedMisconceptions && report.consolidatedMisconceptions.length > 0 && (
               <div className="rounded-3xl bg-amber-50/50 p-6 border border-gold-200 space-y-4 shadow-warm-sm">
                 <div className="flex items-center gap-2 border-b border-gold-200 pb-3">
                   <AlertTriangle className="w-5 h-5 text-gold-600" />
@@ -1160,7 +1178,7 @@ export default function FinalReportPage() {
             )}
 
             {/* Priority Action Steps Joined directly to Course Catalog */}
-            {report.topPriorityActions && report.topPriorityActions.length > 0 && (
+            {report?.topPriorityActions && report.topPriorityActions.length > 0 && (
               <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between border-b border-warmborder pb-2">
                   <div className="flex items-center gap-2 text-base font-bold font-serif text-darkcharcoal-900">
@@ -1382,7 +1400,7 @@ export default function FinalReportPage() {
             </div>
 
             {/* Encouraging Closing Note */}
-            {report.encouragingClosingNote && (
+            {report?.encouragingClosingNote && (
               <div className="p-6 rounded-3xl bg-gradient-to-r from-mint-100 via-white to-mint-50 border border-warmborder text-center space-y-2 shadow-warm-sm">
                 <HeartHandshake className="w-8 h-8 text-leaf-600 mx-auto" />
                 <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Placement Director Note</h3>

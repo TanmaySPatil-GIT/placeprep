@@ -247,6 +247,9 @@ export default function SystemDesignRoundPage() {
 
     const FLASK_SD_URL = `${getBackendUrl()}/api/evaluate-system-design`;
 
+    const controller = new AbortController();
+    const fetchTimeout = setTimeout(() => controller.abort(), 15000);
+
     try {
       const response = await fetch(FLASK_SD_URL, {
         method: 'POST',
@@ -258,8 +261,10 @@ export default function SystemDesignRoundPage() {
           diagramEdges: edges,
           verbalTranscript: combinedApproach,
           expectedChecklist: activeProblem.checklist
-        })
+        }),
+        signal: controller.signal
       });
+      clearTimeout(fetchTimeout);
 
       if (response.ok) {
         const data = await response.json();
@@ -273,6 +278,7 @@ export default function SystemDesignRoundPage() {
         });
       }
     } catch (err) {
+      clearTimeout(fetchTimeout);
       console.warn('System design evaluation notice:', err);
       const fallbackEval = {
         score: 88,

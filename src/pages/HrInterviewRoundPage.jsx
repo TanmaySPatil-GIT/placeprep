@@ -390,61 +390,66 @@ export default function HrInterviewRoundPage() {
     setConversationHistory([]);
     setAiState('thinking');
 
-    let initSession = null;
     try {
-      console.log('[OpeningTurn Debug: HR] 2. Awaiting initializeInterviewSession...');
-      const sessionPromise = initializeInterviewSession({
-        userId: userProfile?.uid || 'user_anon',
-        selectedCompany: companyName,
-        selectedField: 'sde',
-        roundType: 'hr',
-        difficultyLevel: difficultyLevel || 'medium'
-      });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
-      );
-      initSession = await Promise.race([sessionPromise, timeoutPromise]);
-      console.log('[OpeningTurn Debug: HR] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
-      setSessionState(initSession);
-      sessionStateRef.current = initSession;
+      let initSession = null;
+      try {
+        console.log('[OpeningTurn Debug: HR] 2. Awaiting initializeInterviewSession...');
+        const sessionPromise = initializeInterviewSession({
+          userId: userProfile?.uid || 'user_anon',
+          selectedCompany: companyName,
+          selectedField: 'sde',
+          roundType: 'hr',
+          difficultyLevel: difficultyLevel || 'medium'
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('initializeInterviewSession timeout')), 5000)
+        );
+        initSession = await Promise.race([sessionPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: HR] 3. initializeInterviewSession completed. Session ID:', initSession?.sessionId);
+        setSessionState(initSession);
+        sessionStateRef.current = initSession;
+      } catch (err) {
+        console.warn('[OpeningTurn Debug: HR] 3. HR Session initialization notice:', err.message);
+      }
+
+      // Save only question IDs selected for this current session into recent tracking
+      saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
+
+      let initialGreeting = null;
+      try {
+        console.log('[OpeningTurn Debug: HR] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
+        const openingPromise = executeOpeningTurn({
+          sessionState: initSession,
+          roundType: 'hr',
+          backendUrl: getBackendUrl()
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
+        );
+        initialGreeting = await Promise.race([openingPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: HR] 5. executeOpeningTurn completed. Opening text:', initialGreeting);
+      } catch (opErr) {
+        console.warn('[OpeningTurn Debug: HR] 5. HR executeOpeningTurn notice:', opErr.message);
+      }
+
+      if (!initialGreeting) {
+        console.log('[OpeningTurn Debug: HR] 6. Using initial fallback opening question.');
+        const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
+        initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
+      }
+      
+      console.log('[OpeningTurn Debug: HR] 7. Setting opening question and resetting aiState to idle.');
+      setCurrentSpokenQuestion(initialGreeting);
+      setConversationHistory([{ role: 'interviewer', text: initialGreeting }]);
+
+      setTimeout(() => {
+        triggerAISpeech(initialGreeting);
+      }, 500);
     } catch (err) {
-      console.warn('[OpeningTurn Debug: HR] 3. HR Session initialization notice:', err.message);
+      console.error('[HrInterviewRoundPage] Error starting HR session:', err);
+    } finally {
+      setAiState('idle');
     }
-
-    // Save only question IDs selected for this current session into recent tracking
-    saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
-
-    let initialGreeting = null;
-    try {
-      console.log('[OpeningTurn Debug: HR] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
-      const openingPromise = executeOpeningTurn({
-        sessionState: initSession,
-        roundType: 'hr',
-        backendUrl: getBackendUrl()
-      });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
-      );
-      initialGreeting = await Promise.race([openingPromise, timeoutPromise]);
-      console.log('[OpeningTurn Debug: HR] 5. executeOpeningTurn completed. Opening text:', initialGreeting);
-    } catch (opErr) {
-      console.warn('[OpeningTurn Debug: HR] 5. HR executeOpeningTurn notice:', opErr.message);
-    }
-
-    if (!initialGreeting) {
-      console.log('[OpeningTurn Debug: HR] 6. Using initial fallback opening question.');
-      const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
-      initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
-    }
-    
-    console.log('[OpeningTurn Debug: HR] 7. Setting opening question and resetting aiState to idle.');
-    setCurrentSpokenQuestion(initialGreeting);
-    setConversationHistory([{ role: 'interviewer', text: initialGreeting }]);
-    setAiState('idle');
-
-    setTimeout(() => {
-      triggerAISpeech(initialGreeting);
-    }, 500);
   };
 
   const handleStartAnswer = () => {

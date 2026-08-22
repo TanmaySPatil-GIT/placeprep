@@ -214,6 +214,9 @@ export default function DsaRoundPage() {
       else numericMemKb = Math.round(rawMem);
     }
 
+    const compController = new AbortController();
+    const compTimeout = setTimeout(() => compController.abort(), 15000);
+
     try {
       const res = await fetch(FLASK_COMPLEXITY_URL, {
         method: 'POST',
@@ -225,14 +228,17 @@ export default function DsaRoundPage() {
           executionTimeMs: numericTime,
           memoryUsedKb: numericMemKb,
           optimalComplexity: activeQuestion.optimalComplexity || 'O(N) time, O(1) space'
-        })
+        }),
+        signal: compController.signal
       });
+      clearTimeout(compTimeout);
       if (res.ok) {
         const compData = await res.json();
         setComplexityAnalysisData(compData);
         return compData;
       }
     } catch (err) {
+      clearTimeout(compTimeout);
       console.warn('Complexity analysis notice:', err.message);
     }
     return null;
@@ -281,6 +287,8 @@ export default function DsaRoundPage() {
       const FLASK_EVAL_URL = `${getBackendUrl()}/api/evaluate-code`;
       
       let evaluationData = null;
+      const evalController = new AbortController();
+      const evalTimeout = setTimeout(() => evalController.abort(), 15000);
       try {
         const response = await fetch(FLASK_EVAL_URL, {
           method: 'POST',
@@ -288,10 +296,15 @@ export default function DsaRoundPage() {
           body: JSON.stringify({
             code, language: selectedLanguage, problemTitle: activeQuestion.title, problemDescription: activeQuestion.description,
             testResults: { passedCount: execRes?.passedCount || 0, total: execRes?.total || 0, allPassed: execRes?.allPassed || false }
-          })
+          }),
+          signal: evalController.signal
         });
+        clearTimeout(evalTimeout);
         if (response.ok) evaluationData = await response.json();
-      } catch (e) { console.warn('AI eval failed'); }
+      } catch (e) {
+        clearTimeout(evalTimeout);
+        console.warn('AI eval failed');
+      }
 
       if (!evaluationData) {
         evaluationData = {

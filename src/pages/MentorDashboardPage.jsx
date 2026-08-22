@@ -159,12 +159,14 @@ export default function MentorDashboardPage() {
             return;
           }
         }
+        // Fallback to demo mock data
+        setStudents(MOCK_STUDENTS);
       } catch (err) {
         console.warn('Mentor Firestore fetch notice:', err.message);
+        setStudents(MOCK_STUDENTS);
+      } finally {
+        setLoading(false);
       }
-      // Fallback to demo mock data
-      setStudents(MOCK_STUDENTS);
-      setLoading(false);
     };
     fetchData();
   }, []);
