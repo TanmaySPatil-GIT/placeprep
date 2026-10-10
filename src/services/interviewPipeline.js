@@ -12,7 +12,8 @@ export async function executeInterviewTurn({
   roundType = 'technical',
   currentTopicId,
   backendUrl,
-  signal
+  signal,
+  isFallbackQuestion = false
 }) {
   // Null guard — sessionState may be null on first turn if React state hasn't propagated
   const safeSession = sessionState || {};
@@ -47,13 +48,18 @@ export async function executeInterviewTurn({
 
   if (!evaluatorOutput) {
     evaluatorOutput = {
-      verdict: 'partially_correct',
+      verdict: 'evaluation_unavailable',
       conceptsCorrect: [],
       conceptsWrong: [],
       conceptsMissing: [],
+      evidenceQuote: null,
+      rubricVersion: 'v1.0-interviewRubrics',
+      modelUsed: 'pipeline-fallback',
+      uncertainty: 'high',
       confidenceOfStudent: 'medium',
       followUpWorthy: true,
-      reason: 'Fallback evaluation response.'
+      degraded: true,
+      reason: 'Evaluation unavailable due to a temporary AI service issue.'
     };
     console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 1: Using Fallback Evaluator Output]`, evaluatorOutput);
   }
@@ -71,7 +77,8 @@ export async function executeInterviewTurn({
         question,
         studentAnswer,
         evaluatorOutput,
-        decisionOutput
+        decisionOutput,
+        isFallbackQuestion
       });
       if (savedState) {
         updatedSessionState = savedState;
@@ -84,6 +91,7 @@ export async function executeInterviewTurn({
 
   // 4. Prompt 5: Call Question Generator Endpoint
   let interviewerResponse = null;
+  let nextIsFallbackQuestion = false;
   try {
     const genPayload = {
       sessionId: updatedSessionState?.sessionId || sessionState?.sessionId,
@@ -103,6 +111,9 @@ export async function executeInterviewTurn({
     if (genResp.ok) {
       const genData = await genResp.json();
       interviewerResponse = genData.interviewerResponse;
+      if (genData.isFallback || genData.fallbackQuestion || genData.degraded) {
+        nextIsFallbackQuestion = true;
+      }
       console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: /api/generate-question RESOLVED 200] Response Data:`, genData);
     } else {
       console.warn(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: /api/generate-question ERROR] Status:`, genResp.status, genResp.statusText);
@@ -113,6 +124,7 @@ export async function executeInterviewTurn({
 
   if (!interviewerResponse) {
     interviewerResponse = "Thank you for your explanation. Let's move to our next question.";
+    nextIsFallbackQuestion = true;
     console.log(`[interviewPipeline:${roundType.toUpperCase()}] [API 2: Using Fallback Question Response]`, interviewerResponse);
   }
 
@@ -121,6 +133,7 @@ export async function executeInterviewTurn({
     decisionOutput,
     updatedSessionState,
     interviewerResponse,
+    isFallbackQuestion: nextIsFallbackQuestion,
     isNewTopic: decisionOutput.topicAdvance
   };
 }
@@ -155,7 +168,17 @@ export async function executeOpeningTurn({
       console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 2 - START] Parsing response.json()...`);
       const data = await response.json();
       console.log(`[executeOpeningTurn:${roundType.toUpperCase()}] [AWAIT 2 - END] Parsed JSON data:`, data);
-      return data.interviewerResponse || null;
+      const text = data.interviewerResponse || null;
+      const isFallback = Boolean(data.isFallback || data.fallbackQuestion || data.degraded);
+      if (text) {
+        const resObj = new String(text);
+        resObj.question = text;
+        resObj.interviewerResponse = text;
+        resObj.isFallbackQuestion = isFallback;
+        resObj.isFallback = isFallback;
+        return resObj;
+      }
+      return null;
     } else {
       console.warn(`[executeOpeningTurn:${roundType.toUpperCase()}] Non-ok response: ${response.status} ${response.statusText}`);
     }

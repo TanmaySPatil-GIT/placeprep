@@ -79,6 +79,7 @@ export default function InterviewRoundPage() {
     selectedCompany, 
     setRoundIndex, 
     addAnswerResult, 
+    setSessionState: setGlobalSessionState,
     resumeQuestions, 
     experienceLevel, 
     experienceYears, 
@@ -107,6 +108,7 @@ export default function InterviewRoundPage() {
   const [aiReasoning, setAiReasoning] = useState('');
   const [sessionState, setSessionState] = useState(null);
   const sessionStateRef = useRef(null); // mirrors sessionState for sync access in async handlers
+  const currentQuestionIsFallbackRef = useRef(false);
 
   // Video & Stream refs
   const videoRef = useRef(null);
@@ -517,7 +519,8 @@ export default function InterviewRoundPage() {
         console.warn('[OpeningTurn Debug: TECHNICAL] 3. initializeInterviewSession notice:', err.message);
       }
 
-      let openingText = null;
+      let openingRes = null;
+      let isFallbackOpening = false;
       try {
         console.log('[OpeningTurn Debug: TECHNICAL] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
         const openingPromise = executeOpeningTurn({
@@ -528,10 +531,16 @@ export default function InterviewRoundPage() {
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
         );
-        openingText = await Promise.race([openingPromise, timeoutPromise]);
-        console.log('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn completed. Opening text:', openingText);
+        openingRes = await Promise.race([openingPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn completed. Opening text:', openingRes);
       } catch (opErr) {
         console.warn('[OpeningTurn Debug: TECHNICAL] 5. executeOpeningTurn notice:', opErr.message);
+      }
+
+      let openingText = null;
+      if (openingRes) {
+        openingText = typeof openingRes === 'object' ? (openingRes.question || String(openingRes)) : openingRes;
+        isFallbackOpening = Boolean(openingRes.isFallbackQuestion || openingRes.isFallback);
       }
 
       if (!openingText) {
@@ -539,7 +548,9 @@ export default function InterviewRoundPage() {
         const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
         const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
         openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
+        isFallbackOpening = true;
       }
+      currentQuestionIsFallbackRef.current = isFallbackOpening;
 
       console.log('[OpeningTurn Debug: TECHNICAL] 7. Setting opening question and resetting aiState to idle.');
       setCurrentSpokenQuestion(openingText);
@@ -690,7 +701,8 @@ export default function InterviewRoundPage() {
           roundType: 'technical',
           currentTopicId: activeSession?.currentTopicId || 'oop-inheritance',
           backendUrl: getBackendUrl(),
-          signal: controller.signal
+          signal: controller.signal,
+          isFallbackQuestion: currentQuestionIsFallbackRef.current
         });
 
         clearTimeout(fetchTimeout);
@@ -702,8 +714,28 @@ export default function InterviewRoundPage() {
             console.log('[InterviewRoundPage:Tech] [setState START] setSessionState with updated session state');
             setSessionState(turnResult.updatedSessionState);
             sessionStateRef.current = turnResult.updatedSessionState;
+            if (typeof setGlobalSessionState === 'function') {
+              setGlobalSessionState(turnResult.updatedSessionState);
+            }
             console.log('[InterviewRoundPage:Tech] [setState COMPLETE] setSessionState updated');
           }
+          if (turnResult.evaluatorOutput) {
+            addAnswerResult({
+              questionId: `q-${totalExchanges}`,
+              evidenceQuote: turnResult.evaluatorOutput.evidenceQuote,
+              verdict: turnResult.evaluatorOutput.verdict,
+              conceptsCorrect: turnResult.evaluatorOutput.conceptsCorrect,
+              conceptsWrong: turnResult.evaluatorOutput.conceptsWrong,
+              conceptsMissing: turnResult.evaluatorOutput.conceptsMissing,
+              uncertainty: turnResult.evaluatorOutput.uncertainty,
+              modelUsed: turnResult.evaluatorOutput.modelUsed,
+              rubricVersion: turnResult.evaluatorOutput.rubricVersion,
+              reason: turnResult.evaluatorOutput.reason,
+              isFallbackQuestion: currentQuestionIsFallbackRef.current,
+              degraded: Boolean(turnResult.evaluatorOutput.degraded)
+            });
+          }
+          currentQuestionIsFallbackRef.current = Boolean(turnResult.isFallbackQuestion);
         }
       } catch (err) {
         clearTimeout(fetchTimeout);
@@ -762,6 +794,7 @@ export default function InterviewRoundPage() {
             const unusedFromBank = questionsBank.find(q => !isDuplicate(q.question));
             if (unusedFromBank) {
               nextText = unusedFromBank.question;
+              currentQuestionIsFallbackRef.current = true;
               console.log('[Anti-Repetition Safeguard: Technical] Substituted with fresh question from question bank:', nextText);
             }
           }

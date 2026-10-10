@@ -55,6 +55,23 @@ export function PrepProvider({ children }) {
     }
   });
 
+  const [sessionState, setSessionStateInternal] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('placeprep_session_state') || localStorage.getItem('placeprep_session_state');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const setSessionState = (state) => {
+    setSessionStateInternal(state);
+    try {
+      sessionStorage.setItem('placeprep_session_state', JSON.stringify(state));
+      localStorage.setItem('placeprep_session_state', JSON.stringify(state));
+    } catch (e) {}
+  };
+
   const [dsaResult, setDsaResultState] = useState(() => {
     try {
       const saved = localStorage.getItem('placeprep_dsa_result');
@@ -371,7 +388,14 @@ export function PrepProvider({ children }) {
 
   const addAnswerResult = (result) => {
     setSessionResults((prev) => {
-      const updated = [...prev.filter(r => r.questionId !== result.questionId), result];
+      const existingIdx = prev.findIndex(r => r.questionId === result.questionId);
+      let updated;
+      if (existingIdx >= 0) {
+        updated = [...prev];
+        updated[existingIdx] = { ...updated[existingIdx], ...result };
+      } else {
+        updated = [...prev, result];
+      }
       try {
         localStorage.setItem('placeprep_session_results', JSON.stringify(updated));
       } catch (e) {}
@@ -390,6 +414,8 @@ export function PrepProvider({ children }) {
     interviewerPersona,
     currentRoundIndex,
     sessionResults,
+    sessionState,
+    setSessionState,
     dsaResult,
     aptitudeResult,
     technicalMcqResult,

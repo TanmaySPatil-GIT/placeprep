@@ -133,7 +133,8 @@ export async function updateStateAfterTurn(sessionId, {
   question,
   studentAnswer,
   evaluatorOutput = {},
-  decisionOutput = {}
+  decisionOutput = {},
+  isFallbackQuestion = false
 }) {
   // Load session from Firestore if sessionState not passed directly
   let session = sessionState;
@@ -156,10 +157,12 @@ export async function updateStateAfterTurn(sessionId, {
   updatedSession.strongSignals = updatedSession.strongSignals || [];
   updatedSession.weakSignals = updatedSession.weakSignals || [];
 
+  const turnIsFallback = Boolean(isFallbackQuestion || evaluatorOutput.isFallbackQuestion || evaluatorOutput.fallbackQuestion || evaluatorOutput.isFallback);
+
   // A. Append to recentTurns and track in askedQuestions history
   if (question && question.trim()) {
     const trimmedQ = question.trim();
-    updatedSession.recentTurns.push({ role: 'interviewer', text: trimmedQ });
+    updatedSession.recentTurns.push({ role: 'interviewer', text: trimmedQ, isFallbackQuestion: turnIsFallback });
     if (!updatedSession.askedQuestions.includes(trimmedQ)) {
       updatedSession.askedQuestions.push(trimmedQ);
     }
@@ -170,17 +173,29 @@ export async function updateStateAfterTurn(sessionId, {
 
   // B. Append evaluator output to evaluationLog
   const turnIndex = updatedSession.evaluationLog.length + 1;
+  const isUnavailable = evaluatorOutput.verdict === 'evaluation_unavailable';
   const evalLogEntry = {
     turnIndex,
     topicId: updatedSession.currentTopicId,
     question: question || '',
     studentAnswer: studentAnswer || '',
-    score: evaluatorOutput.score ?? 75,
-    passed: evaluatorOutput.passed ?? true,
-    keyConceptsCovered: evaluatorOutput.keyConceptsCovered || [],
-    keyConceptGaps: evaluatorOutput.keyConceptGaps || [],
-    misconceptionsTriggered: evaluatorOutput.misconceptionsTriggered || [],
-    feedback: evaluatorOutput.feedback || '',
+    score: isUnavailable ? null : (evaluatorOutput.score ?? (evaluatorOutput.verdict === 'correct' ? 100 : evaluatorOutput.verdict === 'partially_correct' ? 70 : 30)),
+    passed: isUnavailable ? null : (evaluatorOutput.passed ?? (evaluatorOutput.verdict === 'correct' || evaluatorOutput.verdict === 'partially_correct')),
+    verdict: evaluatorOutput.verdict || 'partially_correct',
+    conceptsCorrect: evaluatorOutput.conceptsCorrect || evaluatorOutput.keyConceptsCovered || [],
+    conceptsWrong: evaluatorOutput.conceptsWrong || evaluatorOutput.misconceptionsTriggered || [],
+    conceptsMissing: evaluatorOutput.conceptsMissing || evaluatorOutput.keyConceptGaps || [],
+    evidenceQuote: isUnavailable ? null : (evaluatorOutput.evidenceQuote ?? ''),
+    rubricVersion: evaluatorOutput.rubricVersion || 'v1.0-interviewRubrics',
+    modelUsed: evaluatorOutput.modelUsed || 'unknown',
+    uncertainty: evaluatorOutput.uncertainty || (isUnavailable ? 'high' : 'low'),
+    degraded: Boolean(evaluatorOutput.degraded || isUnavailable),
+    isFallbackQuestion: turnIsFallback,
+    reason: evaluatorOutput.reason || evaluatorOutput.feedback || '',
+    keyConceptsCovered: evaluatorOutput.conceptsCorrect || evaluatorOutput.keyConceptsCovered || [],
+    keyConceptGaps: evaluatorOutput.conceptsMissing || evaluatorOutput.keyConceptGaps || [],
+    misconceptionsTriggered: evaluatorOutput.conceptsWrong || evaluatorOutput.misconceptionsTriggered || [],
+    feedback: evaluatorOutput.reason || evaluatorOutput.feedback || '',
     timestamp: new Date().toISOString()
   };
   updatedSession.evaluationLog.push(evalLogEntry);

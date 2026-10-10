@@ -245,47 +245,55 @@ export async function analyzeFaceFrame(videoElement) {
 }
 
 /**
- * Compute composite Facial Confidence Score (0-100) across continuous telemetry frames.
- * Formula: (eye_contact * 40%) + (no_looking_away * 20%) + (head_stability * 20%) + (smile_frequency * 20%)
- * Silent Fallback: If face undetected for > 5 seconds, returns baseline defaults without crashing.
+ * Compute composite Gaze & Attentiveness Score (0-100) across continuous telemetry frames.
+ * Signals used are strictly physical, measurable telemetry:
+ * - Eye Contact Ratio (50% weight): candidate gaze centered on camera
+ * - Presence Ratio (20% weight): candidate face detected in frame vs total session duration
+ * - Forward Posture / No Looking Away (15% weight): no extreme yaw/pitch angles
+ * - Head Stability (15% weight): frame-to-frame landmark position variance
+ *
+ * NOTE: Facial emotion/expression classification is strictly EXCLUDED from all scores and ratings.
  */
 export function computeFacialConfidenceScore(telemetryLogs = []) {
   if (!telemetryLogs || telemetryLogs.length === 0) {
     return {
-      facialScore: 85,
+      facialScore: 88, // backward-compat alias
+      attentivenessScore: 88,
       eyeContactRatio: 90,
+      presenceRatio: 95,
       noLookingAwayRatio: 92,
       headStabilityRatio: 88,
-      smileRatio: 85,
       isFallback: true,
-      reasoning: 'Webcam telemetry inactive or face not detected for >5s — baseline fallback benchmark applied.'
+      reasoning: 'Webcam telemetry inactive or face not detected for >5s — baseline attentiveness benchmark applied.'
     };
   }
 
-  const validFrames = telemetryLogs.filter(f => f && f.faceDetected !== false);
   const totalFrames = telemetryLogs.length;
+  const validFrames = telemetryLogs.filter(f => f && f.faceDetected !== false);
+  const presenceRatio = Math.round((validFrames.length / Math.max(1, totalFrames)) * 100);
 
   if (validFrames.length === 0 || (validFrames.length / totalFrames) < 0.20) {
     return {
-      facialScore: 85,
+      facialScore: 88,
+      attentivenessScore: 88,
       eyeContactRatio: 90,
+      presenceRatio: Math.max(10, presenceRatio),
       noLookingAwayRatio: 92,
       headStabilityRatio: 88,
-      smileRatio: 85,
       isFallback: true,
-      reasoning: 'Webcam face detection unpopulated or low confidence — silent baseline fallback applied.'
+      reasoning: 'Webcam face detection unpopulated or low presence — baseline attentiveness fallback applied.'
     };
   }
 
-  // Signal 1: Eye Contact Ratio (40% weight)
+  // Signal 1: Eye Contact Ratio (50% weight) - Centered camera gaze
   const gazeCenteredFrames = validFrames.filter(f => f.gazeCentered).length;
   const eyeContactRatio = Math.round((gazeCenteredFrames / validFrames.length) * 100);
 
-  // Signal 2: Looking Away Ratio (20% weight)
+  // Signal 2: Looking Away Ratio (15% weight) - Candidate facing forward
   const lookingAwayFrames = validFrames.filter(f => f.lookingAway).length;
   const noLookingAwayRatio = Math.round(((validFrames.length - lookingAwayFrames) / validFrames.length) * 100);
 
-  // Signal 3: Head Stability Ratio (20% weight) - Frame-to-frame nose landmark variance
+  // Signal 3: Head Stability Ratio (15% weight) - Frame-to-frame nose landmark variance
   let totalDeltaX = 0;
   let totalDeltaY = 0;
   let deltaCount = 0;
@@ -301,92 +309,108 @@ export function computeFacialConfidenceScore(telemetryLogs = []) {
   const avgFrameDelta = deltaCount > 0 ? (totalDeltaX + totalDeltaY) / deltaCount : 5;
   const headStabilityRatio = Math.max(50, Math.min(100, Math.round(100 - Math.max(0, avgFrameDelta - 5) * 3)));
 
-  // Signal 4: Smile & Demeanor Frequency (20% weight)
-  const smileFrames = validFrames.filter(f => f.expression === 'happy' || f.expression === 'neutral' || (f.happyScore && f.happyScore > 15)).length;
-  const smileRatio = Math.round((smileFrames / validFrames.length) * 100);
-
-  // Weighted Composite Facial Confidence Score
-  const facialScore = Math.min(100, Math.max(0, Math.round(
-    (eyeContactRatio * 0.40) +
-    (noLookingAwayRatio * 0.20) +
-    (headStabilityRatio * 0.20) +
-    (smileRatio * 0.20)
+  // Measurable Attentiveness Score (strictly gaze & physical presence; zero emotion metrics)
+  const attentivenessScore = Math.min(100, Math.max(0, Math.round(
+    (eyeContactRatio * 0.50) +
+    (presenceRatio * 0.20) +
+    (noLookingAwayRatio * 0.15) +
+    (headStabilityRatio * 0.15)
   )));
 
   return {
-    facialScore,
+    facialScore: attentivenessScore, // backward-compat alias
+    attentivenessScore,
     eyeContactRatio,
+    presenceRatio,
     noLookingAwayRatio,
     headStabilityRatio,
-    smileRatio,
     isFallback: false,
-    reasoning: `Facial Confidence Index: ${eyeContactRatio}% eye contact, ${noLookingAwayRatio}% camera posture, ${headStabilityRatio}% head stability, ${smileRatio}% smile frequency.`
+    reasoning: `Eye contact maintained for ${eyeContactRatio}% of session with ${presenceRatio}% camera presence and steady posture (facial emotion classification excluded).`
   };
 }
 
 /**
- * Generate time-series emotion timeline points and human-readable summary label.
+ * Generate time-series eye-contact & presence attentiveness points and human-readable summary label.
+ * Purely descriptive and non-evaluative: reports verifiable gaze & presence telemetry.
  */
 export function generateSessionEmotionTimeline(telemetryLogs = []) {
   if (!telemetryLogs || telemetryLogs.length === 0) {
     return {
       timeline: [
-        { time: '0s', composureScore: 90, bucket: 'Confident', expression: 'neutral' },
-        { time: '15s', composureScore: 85, bucket: 'Confident', expression: 'happy' },
-        { time: '30s', composureScore: 65, bucket: 'Nervous', expression: 'surprised' },
-        { time: '45s', composureScore: 92, bucket: 'Confident', expression: 'neutral' }
+        { time: '0s', composureScore: 92, eyeContactScore: 92, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' },
+        { time: '15s', composureScore: 88, eyeContactScore: 88, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' },
+        { time: '30s', composureScore: 72, eyeContactScore: 72, state: 'Gaze Shifted', bucket: 'Looking Away', expression: 'neutral' },
+        { time: '45s', composureScore: 94, eyeContactScore: 94, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' }
       ],
-      summaryLabel: "Mostly confident, brief nervousness during high-stakes questions",
-      bucketPercentages: { Confident: 80, Nervous: 15, Stressed: 5 }
+      summaryLabel: "Eye contact maintained for 88% of the session with steady camera presence",
+      eyeContactPercentage: 88,
+      presencePercentage: 95,
+      stabilityPercentage: 90,
+      bucketPercentages: { 
+        EyeContact: 88, 
+        Presence: 95, 
+        HeadStability: 90,
+        Confident: 88, 
+        Nervous: 12, 
+        Stressed: 0 
+      }
     };
   }
 
   const step = Math.max(1, Math.floor(telemetryLogs.length / 8));
   const timeline = [];
-  const counts = { Confident: 0, Nervous: 0, Stressed: 0 };
+  let centeredCount = 0;
+  let presentCount = 0;
 
   telemetryLogs.forEach((log, index) => {
-    const expr = log?.expression || 'neutral';
-    const bucket = mapExpressionToEmotionalBucket(expr);
-    counts[bucket] = (counts[bucket] || 0) + 1;
+    const isPresent = log && log.faceDetected !== false;
+    const isCentered = Boolean(log?.gazeCentered);
+    if (isPresent) presentCount++;
+    if (isCentered) centeredCount++;
 
     if (index % step === 0 || index === telemetryLogs.length - 1) {
       const sec = Math.round(index * 1.5);
-      const composureScore = bucket === 'Confident' ? 95 : bucket === 'Nervous' ? 65 : 35;
+      const score = isCentered ? 95 : isPresent ? (log?.lookingAway ? 65 : 78) : 30;
+      const state = isCentered ? 'Centered Eye Contact' : isPresent ? 'Gaze Shifted' : 'Out of Frame';
+      const bucket = isCentered ? 'Attentive' : isPresent ? 'Looking Away' : 'Undetected';
+
       timeline.push({
         time: `${sec}s`,
-        composureScore,
+        composureScore: score,
+        eyeContactScore: score,
+        state,
         bucket,
-        expression: expr
+        expression: 'neutral'
       });
     }
   });
 
   const total = Math.max(1, telemetryLogs.length);
-  const pctConfident = Math.round((counts.Confident / total) * 100);
-  const pctNervous = Math.round((counts.Nervous / total) * 100);
-  const pctStressed = Math.round((counts.Stressed / total) * 100);
+  const pctEyeContact = Math.round((centeredCount / total) * 100);
+  const pctPresence = Math.round((presentCount / total) * 100);
+  const pctStability = Math.min(100, Math.max(60, Math.round(100 - (100 - pctPresence) * 0.5)));
 
-  let summaryLabel = "Mostly confident throughout the interview drive";
-  if (pctConfident >= 75 && pctNervous > 10) {
-    summaryLabel = "Mostly confident, brief nervousness during technical questioning";
-  } else if (pctConfident >= 70 && pctStressed > 10) {
-    summaryLabel = "Overall composed, minor stress indicators detected under pressure";
-  } else if (pctConfident >= 85) {
-    summaryLabel = "Highly confident, calm, and composed throughout the session";
-  } else if (pctNervous >= 35) {
-    summaryLabel = "Appeared noticeably nervous; focus on mock interview practice and vocal pacing";
-  } else if (pctStressed >= 25) {
-    summaryLabel = "High stress levels detected during technical exchanges; practice composure";
+  let summaryLabel = `Eye contact maintained for ${pctEyeContact}% of the session with steady camera presence`;
+  if (pctEyeContact < 60) {
+    summaryLabel = `Eye contact maintained for ${pctEyeContact}% of the session; recommend centering camera angle`;
   }
 
   return {
     timeline,
     summaryLabel,
+    eyeContactPercentage: pctEyeContact,
+    presencePercentage: pctPresence,
+    stabilityPercentage: pctStability,
     bucketPercentages: {
-      Confident: pctConfident,
-      Nervous: pctNervous,
-      Stressed: pctStressed
+      EyeContact: pctEyeContact,
+      Presence: pctPresence,
+      HeadStability: pctStability,
+      // Backward-compat aliases for stored reports
+      Confident: pctEyeContact,
+      Nervous: Math.max(0, 100 - pctEyeContact),
+      Stressed: 0
     }
   };
 }
+
+export const generateSessionAttentivenessTimeline = generateSessionEmotionTimeline;

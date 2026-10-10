@@ -94,11 +94,11 @@ MODEL_FALLBACK_CHAIN = [
     'gemini-3.7-flash'
 ]
 
-def call_gemini(prompt: str):
-    """Calls Gemini API trying available models with multi-model quota fallback chain."""
+def call_gemini_with_model(prompt: str):
+    """Calls Gemini API trying available models with multi-model quota fallback chain, returning (text, model_name)."""
     if not genai_client:
         print("[Gemini Client] Warning: genai_client is not initialized.")
-        return None
+        return None, None
 
     for model_name in MODEL_FALLBACK_CHAIN:
         try:
@@ -108,7 +108,7 @@ def call_gemini(prompt: str):
             )
             if response and response.text:
                 print(f"[Gemini Client] SUCCESS: Generated content using model '{model_name}'")
-                return response.text
+                return response.text, model_name
         except Exception as e:
             err_msg = str(e)
             if '404' in err_msg or 'NOT_FOUND' in err_msg:
@@ -119,7 +119,12 @@ def call_gemini(prompt: str):
                 print(f"[Gemini Client] Notice: Model '{model_name}' error: {err_msg[:120]}. Rotating to next model...")
 
     print("[Gemini Client] WARNING: All models in fallback chain failed or exhausted.")
-    return None
+    return None, None
+
+def call_gemini(prompt: str):
+    """Calls Gemini API trying available models with multi-model quota fallback chain."""
+    text, _ = call_gemini_with_model(prompt)
+    return text
 def get_company_tier_info(company_name: str) -> dict:
     name = (company_name or '').lower()
     if any(k in name for k in ['google', 'amazon', 'netflix', 'meta', 'apple', 'microsoft', 'uber', 'atlassian']):
@@ -402,14 +407,19 @@ Return this exact JSON structure:
 }}
 """
 
-        raw_text = call_gemini(prompt)
+        raw_text, model_name = call_gemini_with_model(prompt)
         if raw_text:
             try:
                 cleaned_text = clean_json_response(raw_text)
                 parsed_json = json.loads(cleaned_text)
+                parsed_json["degraded"] = False
+                parsed_json["degradedReason"] = None
+                parsed_json["modelUsed"] = model_name or "gemini"
                 return jsonify(parsed_json)
             except Exception as e:
-                print(f"Gemini API Exception in analyze_resume: {e}")
+                print(f"[DEGRADED_FALLBACK] Endpoint: /api/analyze-resume | Model attempt: {model_name or 'primary'} | Reason: JSON parse failed ({e})")
+        else:
+            print(f"[DEGRADED_FALLBACK] Endpoint: /api/analyze-resume | Model attempt: {model_name or 'primary'} | Reason: AI model call failed or returned empty text.")
 
         # Calibrated heuristic fallback response if Gemini client is unconfigured or fails
         lines = [l.strip() for l in cleaned_resume_text.split('\n') if l.strip()]
@@ -429,45 +439,22 @@ Return this exact JSON structure:
                 if len(line) < 150 and line not in extracted_experience:
                     extracted_experience.append(line)
 
-        # Dynamic heuristic ATS score calculation (calibrated against Tier 1/2/3 rubrics)
-        has_frameworks = bool(re.search(r'\b(react|vue|angular|node|express|flask|django|fastapi|spring boot|pytorch|tensorflow|keras|docker|kubernetes|aws|gcp|azure|postgres|postgresql|mongodb|redis)\b', text_lower))
-        has_internship = bool(re.search(r'\b(intern|internship|software engineer intern|sde intern|developer intern|research intern|summer intern)\b', text_lower))
-        has_metrics = bool(re.search(r'(\d+%\s*(reduction|increase|improvement|boost|faster|growth))|(\b(latency|throughput|qps|users|queries)\b.*\d+)|(\d+\s*(k|m|million)\s*(users|requests|queries))', text_lower))
-        is_aiml_branch = bool(re.search(r'\b(aiml|ai & ml|artificial intelligence|machine learning|data science)\b', text_lower))
-        has_ml_projects = bool(re.search(r'\b(pytorch|tensorflow|cnn|rnn|lstm|transformer|bert|llm|huggingface|scikit-learn|yolo|computer vision|nlp|random forest|gradient boosting)\b', text_lower))
-        is_basic_html_only = bool(re.search(r'\b(html|css|javascript)\b', text_lower)) and not has_frameworks
-
-        # Calibrated base score depending on company tier
-        base_score = 25 if tier_info.get('tier', 3) == 3 else 30
-        calc_score = base_score
-        if has_frameworks: calc_score += 25
-        if has_internship: calc_score += 25
-        if has_metrics: calc_score += 15
-        if is_aiml_branch and has_ml_projects: calc_score += 10
-        elif is_aiml_branch and not has_ml_projects: calc_score -= 10
-        if is_basic_html_only: calc_score = min(calc_score, 30)
-
-        calc_score = max(15, min(95, calc_score))
-
         return jsonify({
-            "atsScore": calc_score,
-            "overallImpression": f"This resume shows beginner-level technical depth for {target_field} roles targeting {company_name}. The listed projects and technical stack require significant upgrade with full-stack frameworks, production databases, and domain-relevant experience to pass recruiter screening.",
+            "degraded": True,
+            "degradedReason": "We couldn't fully analyze your resume right now — these results are limited. Try again in a moment for a full personalized analysis.",
+            "atsScore": None,
+            "modelUsed": "degraded-fallback",
+            "overallImpression": f"Basic extraction completed. Deep personalized recruiter analysis is temporarily limited for {company_name}.",
             "strengths": [
                 "Parseable single-column layout structure.",
                 "Factual list of basic programming fundamentals."
             ],
             "weaknesses": [
                 {
-                    "issue": "Lack of Advanced Software Frameworks & Production Depth",
-                    "example": lines[min(3, len(lines)-1)] if lines else "Static web pages",
-                    "suggestion": "Replace basic static web projects with full-stack applications featuring authentication, databases, and API integration.",
-                    "severity": "high"
-                },
-                {
-                    "issue": "Absence of Industry Experience & Quantifiable Engineering Metrics",
-                    "example": "No software engineering internships or performance metrics listed.",
-                    "suggestion": "Secure technical internships or contribute to open-source projects, quantifying outcomes with latency, traffic, or user metrics.",
-                    "severity": "high"
+                    "issue": "Limited Automated Project Depth Analysis",
+                    "example": lines[min(3, len(lines)-1)] if lines else "Resume projects section",
+                    "suggestion": "Retry analysis in a moment for a full personalized evaluation of project frameworks and impact.",
+                    "severity": "medium"
                 }
             ],
             "missingKeywords": ["Data Structures & Algorithms", "Python", "React / Node.js", "SQL / Databases", "System Design", "Docker"],
@@ -479,7 +466,7 @@ Return this exact JSON structure:
             }
         })
     except Exception as outer_err:
-        print(f"Unhandled Exception in analyze_resume: {str(outer_err)}")
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/analyze-resume | Error: Unhandled exception ({str(outer_err)})")
         return jsonify({"error": f"Server error processing resume: {str(outer_err)}"}), 500
 
 
@@ -535,14 +522,21 @@ Return this exact JSON structure:
 }}
 """
 
-    raw_text = call_gemini(prompt)
+    raw_text, model_name = call_gemini_with_model(prompt)
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
+            parsed_json["degraded"] = False
+            parsed_json["isFallback"] = False
+            parsed_json["modelUsed"] = model_name or "gemini"
+            for q in parsed_json.get("questions", []):
+                q["isFallback"] = False
             return jsonify(parsed_json)
         except Exception as e:
-            print(f"Gemini API Exception in generate_resume_interview_questions: {e}")
+            print(f"[DEGRADED_FALLBACK] Endpoint: /api/generate-resume-interview-questions | Model attempt: {model_name or 'primary'} | Reason: JSON parse failed ({e})")
+    else:
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/generate-resume-interview-questions | Model attempt: {model_name or 'primary'} | Reason: AI call failed or empty.")
 
     # Fallback personalized questions
     proj_list = extracted_profile.get('projects', [])
@@ -550,29 +544,43 @@ Return this exact JSON structure:
     first_proj = proj_list[0] if proj_list else "your primary full-stack project"
     first_exp = exp_list[0] if exp_list else "your software engineering internship"
 
+    fallback_questions = [
+        {
+            "question": f"In {first_proj}, what was the most complex architectural trade-off you faced, and how did you validate your choice under {company_name}-level scaling constraints?",
+            "basedOn": first_proj,
+            "focusArea": "System Architecture & Trade-offs",
+            "isFallback": True,
+            "fallbackQuestion": True
+        },
+        {
+            "question": f"Tell me about a time during {first_exp} when you encountered a high-severity bug or failing edge case right before deployment. How did you diagnose it?",
+            "basedOn": first_exp,
+            "focusArea": "Debugging & Production Reliability",
+            "isFallback": True,
+            "fallbackQuestion": True
+        },
+        {
+            "question": f"When building {first_proj}, how did you structure your API layers and state management to maintain low latency?",
+            "basedOn": first_proj,
+            "focusArea": "Full-Stack Efficiency & Clean Code",
+            "isFallback": True,
+            "fallbackQuestion": True
+        },
+        {
+            "question": f"For {company_name}-style technical screens, ownership is paramount. Describe a feature in your resume projects that you owned end-to-end from requirements to delivery.",
+            "basedOn": first_proj,
+            "focusArea": f"{company_name} Ownership & End-to-End Execution",
+            "isFallback": True,
+            "fallbackQuestion": True
+        },
+    ]
+
     return jsonify({
-        "questions": [
-            {
-                "question": f"In {first_proj}, what was the most complex architectural trade-off you faced, and how did you validate your choice under {company_name}-level scaling constraints?",
-                "basedOn": first_proj,
-                "focusArea": "System Architecture & Trade-offs"
-            },
-            {
-                "question": f"Tell me about a time during {first_exp} when you encountered a high-severity bug or failing edge case right before deployment. How did you diagnose it?",
-                "basedOn": first_exp,
-                "focusArea": "Debugging & Production Reliability"
-            },
-            {
-                "question": f"When building {first_proj}, how did you structure your API layers and state management to maintain low latency?",
-                "basedOn": first_proj,
-                "focusArea": "Full-Stack Efficiency & Clean Code"
-            },
-            {
-                "question": f"For {company_name}-style technical screens, ownership is paramount. Describe a feature in your resume projects that you owned end-to-end from requirements to delivery.",
-                "basedOn": first_proj,
-                "focusArea": f"{company_name} Ownership & End-to-End Execution"
-            },
-        ]
+        "degraded": True,
+        "degradedReason": "AI question generator unavailable; using verified fallback questions.",
+        "isFallback": True,
+        "modelUsed": "degraded-fallback",
+        "questions": fallback_questions
     })
 
 
@@ -1023,6 +1031,66 @@ RUBRIC_DATABASE = {
         ]
     }
 }
+INTERVIEW_RUBRICS_VERSION = 'v1.0-interviewRubrics'
+for _rubric in RUBRIC_DATABASE.values():
+    if isinstance(_rubric, dict):
+        _rubric.setdefault('rubricVersion', INTERVIEW_RUBRICS_VERSION)
+
+
+def validate_evidence_quote(quote: str, transcript: str) -> bool:
+    """Validates that evidenceQuote is directly traceable to the transcript without fabrication."""
+    if not isinstance(quote, str):
+        return False
+    q_str = quote.strip()
+    t_str = (transcript or '').strip()
+
+    # If transcript is empty or negligible
+    if not t_str:
+        return q_str == "" or "nothing" in q_str.lower() or "empty" in q_str.lower()
+
+    if not q_str:
+        return False
+
+    explicit_no_quote_phrases = [
+        "nothing relevant to quote",
+        "no relevant content to quote",
+        "nothing to quote",
+        "contains nothing relevant",
+        "contains no relevant content",
+        "no relevant statement",
+        "not applicable"
+    ]
+    if any(p in q_str.lower() for p in explicit_no_quote_phrases):
+        return True
+
+    def tokenize(text):
+        return re.findall(r'[a-z0-9]+', text.lower())
+
+    q_tokens = tokenize(q_str)
+    t_tokens = tokenize(t_str)
+
+    if not q_tokens or not t_tokens:
+        return False
+
+    q_norm = ' '.join(q_tokens)
+    t_norm = ' '.join(t_tokens)
+
+    # 1. Exact normalized substring match
+    if q_norm in t_norm:
+        return True
+
+    # 2. Check contiguous window or high overlap with bigram match
+    overlap = sum(1 for w in q_tokens if w in t_tokens)
+    overlap_ratio = overlap / len(q_tokens)
+
+    if len(q_tokens) >= 2 and overlap_ratio >= 0.7:
+        for i in range(len(q_tokens) - 1):
+            bigram = f"{q_tokens[i]} {q_tokens[i+1]}"
+            if bigram in t_norm:
+                return True
+
+    return False
+
 
 @app.route('/api/evaluate-answer', methods=['POST', 'OPTIONS'])
 def evaluate_answer():
@@ -1046,6 +1114,7 @@ def evaluate_answer():
     topic_name = rubric.get('topicName', 'Technical Concept')
     key_concepts = rubric.get('keyConcepts', [])
     common_misconceptions = rubric.get('commonMisconceptions', [])
+    rubric_version = rubric.get('rubricVersion') or rubric.get('version') or INTERVIEW_RUBRICS_VERSION
 
     # 2. Extract recent state context
     history_summary = ""
@@ -1059,11 +1128,16 @@ def evaluate_answer():
 
     # Pre-check A: "don't know" phrases
     if any(p in ans_clean for p in ["don't know", "dont know", "not sure", "no idea", "idk", "have no clue"]):
+        quote = student_answer.strip()
         return jsonify({
             "verdict": "dont_know",
             "conceptsCorrect": [],
             "conceptsWrong": [],
             "conceptsMissing": key_concepts,
+            "evidenceQuote": quote,
+            "rubricVersion": rubric_version,
+            "modelUsed": "deterministic-precheck",
+            "uncertainty": "low",
             "confidenceOfStudent": "low",
             "followUpWorthy": True,
             "reason": f"Candidate explicitly indicated lack of knowledge or uncertainty on {topic_name}."
@@ -1071,11 +1145,16 @@ def evaluate_answer():
 
     # Pre-check B: Empty / extremely short response
     if len(ans_clean) < 4:
+        quote = student_answer.strip()
         return jsonify({
             "verdict": "vague",
             "conceptsCorrect": [],
             "conceptsWrong": [],
             "conceptsMissing": key_concepts,
+            "evidenceQuote": quote if quote else "",
+            "rubricVersion": rubric_version,
+            "modelUsed": "deterministic-precheck",
+            "uncertainty": "low" if not quote else "medium",
             "confidenceOfStudent": "low",
             "followUpWorthy": True,
             "reason": "Candidate response was empty or too brief to evaluate against reference rubric concepts."
@@ -1092,7 +1171,7 @@ Do NOT act as an interviewer. Do NOT generate the next question.
 QUESTION ASKED: "{last_question}"
 STUDENT ANSWER: "{student_answer}"
 
-REFERENCE GROUND TRUTH RUBRIC ({topic_name}):
+REFERENCE GROUND TRUTH RUBRIC ({topic_name}) [Rubric Version: {rubric_version}]:
 === KEY CONCEPTS TO CHECK FOR ===
 {kc_formatted}
 
@@ -1109,9 +1188,10 @@ CRITICAL GRADING RULES:
 3. Do NOT judge correctness from general knowledge alone — use this rubric as the primary reference.
 4. If the student confused a key concept with a common misconception (e.g. confusing overriding with overloading, or thinking private members are inherited), set verdict to "incorrect" or "partially_correct" and explicitly flag the misconception in conceptsWrong.
 5. Determine verdict strictly from: "correct" | "partially_correct" | "incorrect" | "vague" | "off_topic" | "dont_know".
-6. Determine confidenceOfStudent strictly from: "low" | "medium" | "high".
-7. Set followUpWorthy to true if verdict is "partially_correct", "incorrect", "vague", or "dont_know", or if conceptsMissing is non-empty.
-8. Provide a brief 1-2 sentence reason citing the specific rubric concepts.
+6. EVIDENCE QUOTATION REQUIREMENT: You must quote the exact phrase from the candidate's answer that supports your verdict in evidenceQuote. If the answer contains nothing relevant to quote, state that explicitly rather than inventing supporting evidence.
+7. Self-assess your uncertainty strictly from: "low" | "medium" | "high".
+8. Set followUpWorthy to true if verdict is "partially_correct", "incorrect", "vague", or "dont_know", or if conceptsMissing is non-empty.
+9. Provide a brief 1-2 sentence reason citing the specific rubric concepts.
 
 Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT structure:
 {{
@@ -1119,6 +1199,8 @@ Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT struct
   "conceptsCorrect": ["Concept correctly explained"],
   "conceptsWrong": ["Specific misconception triggered from rubric"],
   "conceptsMissing": ["Key concept omitted"],
+  "evidenceQuote": "exact quote from candidate transcript",
+  "uncertainty": "low",
   "confidenceOfStudent": "medium",
   "followUpWorthy": true,
   "reason": "Brief internal justification referencing the specific rubric concepts."
@@ -1126,51 +1208,82 @@ Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT struct
 """
 
     eval_result = None
-    raw_text = call_gemini(prompt)
+    model_used = None
+
+    raw_text, used_model = call_gemini_with_model(prompt)
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
-            eval_result = json.loads(cleaned_text)
+            parsed = json.loads(cleaned_text)
+            if isinstance(parsed, dict) and 'verdict' in parsed:
+                ev_quote = parsed.get('evidenceQuote', '')
+                if validate_evidence_quote(ev_quote, student_answer):
+                    eval_result = parsed
+                    model_used = used_model or "gemini"
+                else:
+                    print(f"[evaluate_answer] Evidence quote validation rejected for: '{ev_quote[:60]}...'")
         except Exception as e:
-            print(f"Gemini API Exception in evaluate_answer: {e}")
+            print(f"Gemini API Exception in evaluate_answer attempt 1: {e}")
 
+    # Reject and retry once if evidenceQuote is missing or clearly doesn't match transcript
+    if not eval_result:
+        print("[evaluate_answer] Attempt 1 failed or evidenceQuote invalid. Retrying once with strict grounding...")
+        retry_prompt = prompt + f"""\n
+CRITICAL RETRY INSTRUCTION:
+Your previous output was rejected because evidenceQuote was missing, hallucinated, or did not match the candidate's actual words.
+You must quote the exact phrase from the candidate's answer that supports your verdict in evidenceQuote. If the answer contains nothing relevant to quote, state that explicitly rather than inventing supporting evidence.
+CANDIDATE TRANSCRIPT: "{student_answer}"
+"""
+        raw_retry, retry_model = call_gemini_with_model(retry_prompt)
+        if raw_retry:
+            try:
+                cleaned_retry = clean_json_response(raw_retry)
+                parsed_retry = json.loads(cleaned_retry)
+                if isinstance(parsed_retry, dict) and 'verdict' in parsed_retry:
+                    ev_quote = parsed_retry.get('evidenceQuote', '')
+                    if validate_evidence_quote(ev_quote, student_answer):
+                        eval_result = parsed_retry
+                        model_used = retry_model or "gemini"
+                    else:
+                        print(f"[evaluate_answer] Retry evidence quote also rejected: '{ev_quote[:60]}...'")
+            except Exception as e:
+                print(f"Gemini API Exception in evaluate_answer retry: {e}")
+
+    # Fall back to clearly-labeled degraded state: evaluation_unavailable (never guess a verdict)
     if not eval_result or not isinstance(eval_result, dict) or 'verdict' not in eval_result:
-        # Grounded deterministic fallback evaluation
-        has_misconception = any(
-            any(w in ans_clean for w in m.lower().split() if len(w) > 5)
-            for m in common_misconceptions
-        )
-        has_key_concept = any(
-            any(w in ans_clean for w in k.lower().split() if len(w) > 5)
-            for k in key_concepts
-        )
-
-        if has_misconception and not has_key_concept:
-            v = "incorrect"
-            c_wrong = [common_misconceptions[0]] if common_misconceptions else ["Triggered common topic misconception"]
-            c_corr = []
-        elif has_misconception and has_key_concept:
-            v = "partially_correct"
-            c_wrong = [common_misconceptions[0]] if common_misconceptions else ["Mixed correct concepts with misconception"]
-            c_corr = [key_concepts[0]] if key_concepts else ["Basic concept mention"]
-        elif has_key_concept:
-            v = "correct"
-            c_wrong = []
-            c_corr = key_concepts[:2] if key_concepts else ["Demonstrated core concepts"]
-        else:
-            v = "vague"
-            c_wrong = []
-            c_corr = []
-
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/evaluate-answer | Model attempt: {model_used or 'primary'} | Reason: Evaluator AI call and retry failed; returning evaluation_unavailable.")
         eval_result = {
-            "verdict": v,
-            "conceptsCorrect": c_corr,
-            "conceptsWrong": c_wrong,
-            "conceptsMissing": [k for k in key_concepts if k not in c_corr],
-            "confidenceOfStudent": "medium" if v in ["correct", "partially_correct"] else "low",
-            "followUpWorthy": v != "correct",
-            "reason": f"Grounded check against {topic_name} rubric: verdict evaluated as {v}."
+            "verdict": "evaluation_unavailable",
+            "conceptsCorrect": [],
+            "conceptsWrong": [],
+            "conceptsMissing": [],
+            "evidenceQuote": None,
+            "rubricVersion": rubric_version,
+            "modelUsed": "degraded-fallback",
+            "uncertainty": "high",
+            "confidenceOfStudent": "medium",
+            "followUpWorthy": False,
+            "reason": "Evaluation temporarily unavailable due to AI service issue; excluded from scoring.",
+            "degraded": True,
+            "degradedReason": "AI evaluation model unavailable; turn excluded from scoring."
         }
+    else:
+        # Guarantee all required schema fields are present and properly typed
+        uncertainty_val = str(eval_result.get('uncertainty', '')).lower()
+        if uncertainty_val not in ['low', 'medium', 'high']:
+            uncertainty_val = 'low' if eval_result.get('verdict') == 'correct' else 'medium'
+
+        eval_result['rubricVersion'] = rubric_version
+        eval_result['modelUsed'] = model_used or "gemini"
+        eval_result['uncertainty'] = uncertainty_val
+        eval_result['evidenceQuote'] = eval_result.get('evidenceQuote', '').strip()
+        if not eval_result.get('conceptsCorrect'): eval_result['conceptsCorrect'] = []
+        if not eval_result.get('conceptsWrong'): eval_result['conceptsWrong'] = []
+        if not eval_result.get('conceptsMissing'): eval_result['conceptsMissing'] = []
+        if 'confidenceOfStudent' not in eval_result:
+            eval_result['confidenceOfStudent'] = 'high' if eval_result.get('verdict') == 'correct' else 'medium'
+        if 'followUpWorthy' not in eval_result:
+            eval_result['followUpWorthy'] = eval_result.get('verdict') != 'correct'
 
     return jsonify(eval_result)
 
@@ -1459,6 +1572,7 @@ Return ONLY valid raw JSON with NO code blocks:
     candidate_text = gen_resp.get('interviewerResponse', '') if isinstance(gen_resp, dict) else ''
 
     if not candidate_text or is_duplicate_text(candidate_text):
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/generate-question | Strategy: {strategy} | Reason: AI question generator failed or was duplicate; using hardcoded fallback question.")
         if strategy == 'repeat_question':
             resp = "Could you please elaborate on your previous answer? I'd love to hear your thoughts again."
         elif strategy == 'simplify_question':
@@ -1473,8 +1587,17 @@ Return ONLY valid raw JSON with NO code blocks:
             resp = f"Good point on the initial concept! Building on that, how would you address {topic_name} in a team setting?"
 
         gen_resp = {
-            "interviewerResponse": resp
+            "interviewerResponse": resp,
+            "isFallback": True,
+            "fallbackQuestion": True,
+            "degraded": True,
+            "degradedReason": "AI question generator unavailable; using fallback turn question."
         }
+    else:
+        if isinstance(gen_resp, dict):
+            gen_resp["isFallback"] = False
+            gen_resp["fallbackQuestion"] = False
+            gen_resp["degraded"] = False
 
     return jsonify(gen_resp)
 
@@ -2135,14 +2258,19 @@ Return this exact JSON structure:
 }}
 """
 
-    raw_text = call_gemini(prompt)
+    raw_text, model_name = call_gemini_with_model(prompt)
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
+            parsed_json["degraded"] = False
+            parsed_json["degradedReason"] = None
+            parsed_json["modelUsed"] = model_name or "gemini"
             return jsonify(parsed_json)
         except Exception as e:
-            print(f"Gemini API Exception in recommendations: {e}")
+            print(f"[DEGRADED_FALLBACK] Endpoint: /api/recommendations | Model attempt: {model_name or 'primary'} | Reason: JSON parse failed ({e})")
+    else:
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/recommendations | Model attempt: {model_name or 'primary'} | Reason: AI model call failed or returned empty text.")
 
     # Fallback response using top_candidates directly
     fallback_recs = []
@@ -2157,7 +2285,7 @@ Return this exact JSON structure:
             "cost": item.get('cost', 'Free'),
             "estimatedDuration": item.get('estimatedDuration', '4 weeks'),
             "link": item.get('link'),
-            "whyItHelps": f"Specifically recommended for {target_field} candidates at {company_name} to strengthen {weakness_str}.",
+            "whyItHelps": f"General verified resource for {target_field} candidates to build core technical proficiency.",
             "priorityRank": idx + 1
         })
         if idx < 4:
@@ -2168,6 +2296,9 @@ Return this exact JSON structure:
             })
 
     return jsonify({
+        "degraded": True,
+        "degradedReason": "Showing general recommendations — personalized suggestions are temporarily unavailable",
+        "modelUsed": "degraded-fallback",
         "recommendations": fallback_recs,
         "learningPath": learning_path
     })
@@ -2841,113 +2972,11 @@ def generate_final_report():
     if hr_results and isinstance(hr_results, dict) and hr_results.get('score') is not None:
         active_rounds['hr_interview'] = hr_results.get('score')
 
-    # 5-Axis Sub-Scores Calculation & Dynamic Weight Normalization
-    sub_score_definitions = {
-        'technicalKnowledge': {'weight': 0.30, 'label': 'Technical Knowledge'},
-        'communication': {'weight': 0.20, 'label': 'Communication'},
-        'confidence': {'weight': 0.15, 'label': 'Confidence (Webcam Gaze)'},
-        'bodyLanguage': {'weight': 0.15, 'label': 'Body Language (Posture & Stability)'},
-        'problemSolving': {'weight': 0.20, 'label': 'Problem Solving'}
-    }
+    # --- DETERMINISTIC PLACEMENT READINESS SCORING ENGINE (v1.0-scoring) ---
+    SCORING_FORMULA_NAME = "deterministic-composite-readiness"
+    SCORING_FORMULA_VERSION = "v1.0-scoring"
 
-    sub_scores = {}
-
-    # 1. Technical Knowledge (from coding correctness + system design + technical interview + tech MCQs)
-    tech_vals = []
-    if dsa_results and dsa_results.get('score') is not None:
-        tech_vals.append(float(dsa_results.get('score')) / 10.0)
-    if system_design_results and isinstance(system_design_results, dict):
-        sd_score = (system_design_results.get('evaluation') or {}).get('score') or system_design_results.get('score')
-        if sd_score is not None:
-            tech_vals.append(float(sd_score) / 10.0)
-    if interview_results and interview_results.get('overallConfidence') is not None:
-        tech_vals.append(float(interview_results.get('overallConfidence')) / 10.0)
-    if technical_mcq_results and technical_mcq_results.get('percentage') is not None:
-        tech_vals.append(float(technical_mcq_results.get('percentage')) / 10.0)
-    
-    if tech_vals:
-        sub_scores['technicalKnowledge'] = {
-            'score': round(sum(tech_vals) / len(tech_vals), 1),
-            'active': True,
-            'notes': 'Derived from coding correctness, technical interview, and core CS MCQs.'
-        }
-    else:
-        sub_scores['technicalKnowledge'] = {'score': 0, 'active': False, 'notes': 'Technical rounds not completed.'}
-
-    # 2. Communication (from speech telemetry WPM/fillers + HR STAR score)
-    comm_vals = []
-    if hr_results and hr_results.get('score') is not None:
-        comm_vals.append(float(hr_results.get('score')) / 10.0)
-    if interview_results and interview_results.get('overallConfidence') is not None:
-        comm_vals.append(float(interview_results.get('overallConfidence')) / 10.0)
-
-    if comm_vals:
-        sub_scores['communication'] = {
-            'score': round(sum(comm_vals) / len(comm_vals), 1),
-            'active': True,
-            'notes': 'Derived from speech telemetry (WPM, fillers, pauses) and STAR behavioral scoring.'
-        }
-    else:
-        sub_scores['communication'] = {'score': 0, 'active': False, 'notes': 'Voice interview rounds not completed.'}
-
-    # 3. Confidence & 4. Body Language (Strict Honesty Rule: Active ONLY if webcam telemetry was recorded!)
-    webcam_captured = data.get('webcamCaptured', False) or (interview_results and interview_results.get('facialScore') is not None) or (data.get('facialTelemetry') is not None)
-
-    if webcam_captured:
-        facial_val = float(data.get('facialTelemetry', {}).get('facialScore', (interview_results or {}).get('facialScore', 0))) / 10.0
-        gaze_val = float(data.get('facialTelemetry', {}).get('eyeContactRatio', 0)) / 10.0
-        stability_val = float(data.get('facialTelemetry', {}).get('headStabilityRatio', 0)) / 10.0
-
-        sub_scores['confidence'] = {
-            'score': round((facial_val * 0.5) + (gaze_val * 0.5), 1),
-            'active': True,
-            'notes': 'Derived from webcam gaze centering and eye contact tracking.'
-        }
-        sub_scores['bodyLanguage'] = {
-            'score': round(stability_val, 1),
-            'active': True,
-            'notes': 'Derived from landmark posture and head stability variance.'
-        }
-    else:
-        # STRICT HONESTY RULE: Omit sub-scores rather than showing fake 0 or guessed numbers!
-        sub_scores['confidence'] = {'score': 0, 'active': False, 'notes': 'Webcam telemetry not recorded.'}
-        sub_scores['bodyLanguage'] = {'score': 0, 'active': False, 'notes': 'Webcam telemetry not recorded.'}
-
-    # 5. Problem Solving (from coding complexity/approach + aptitude)
-    ps_vals = []
-    if dsa_results and dsa_results.get('score') is not None:
-        ps_vals.append(float(dsa_results.get('score')) / 10.0)
-    if aptitude_results and aptitude_results.get('percentage') is not None:
-        ps_vals.append(float(aptitude_results.get('percentage')) / 10.0)
-    
-    if ps_vals:
-        sub_scores['problemSolving'] = {
-            'score': round(sum(ps_vals) / len(ps_vals), 1),
-            'active': True,
-            'notes': 'Derived from algorithmic problem solving and quantitative reasoning.'
-        }
-    else:
-        sub_scores['problemSolving'] = {'score': 0, 'active': False, 'notes': 'Problem solving rounds not completed.'}
-
-    # Dynamic Weight Normalization across Active Sub-Scores
-    active_keys = [k for k, v in sub_scores.items() if v['active']]
-    if not active_keys:
-        overall_interview_score = 0
-        calculated_readiness_score = 0
-    else:
-        sum_active_weights = sum(sub_score_definitions[k]['weight'] for k in active_keys)
-        overall_score = 0.0
-
-        for k in active_keys:
-            norm_weight = sub_score_definitions[k]['weight'] / sum_active_weights
-            overall_score += (sub_scores[k]['score'] * 10.0) * norm_weight
-
-        overall_interview_score = int(round(overall_score))
-        overall_interview_score = max(0, min(100, overall_interview_score))
-        calculated_readiness_score = overall_interview_score
-
-
-    # Extract structured evaluationLog metrics directly from interviewSessions document (Prompt 2)
+    # Extract structured evaluationLog metrics directly from interviewSessions document
     session_state = data.get('sessionState') or data.get('sessionResults') or {}
     eval_log = session_state.get('evaluationLog', []) if isinstance(session_state, dict) else []
     topic_plan = session_state.get('topicPlan', []) if isinstance(session_state, dict) else []
@@ -2991,11 +3020,17 @@ def generate_final_report():
             if c: t_obj['conceptsMissing'].add(c)
 
     topic_mastery = []
-    verdict_counts = {'correct': 0, 'partially_correct': 0, 'incorrect': 0, 'vague': 0, 'off_topic': 0, 'dont_know': 0}
+    verdict_counts = {'correct': 0, 'partially_correct': 0, 'incorrect': 0, 'vague': 0, 'off_topic': 0, 'dont_know': 0, 'evaluation_unavailable': 0}
+
+    valid_eval_turns = [t for t in eval_log if t.get('verdict') != 'evaluation_unavailable']
+    excluded_turns = [t for t in eval_log if t.get('verdict') == 'evaluation_unavailable']
+    excluded_turns_count = len(excluded_turns)
+    fallback_questions_count = sum(1 for t in eval_log if t.get('isFallbackQuestion') or t.get('isFallback') or t.get('fallbackQuestion'))
 
     for tid, t in topic_map.items():
         turns = t['turns']
-        total_turns = len(turns)
+        valid_topic_turns = [turn for turn in turns if turn.get('verdict') != 'evaluation_unavailable']
+        total_eval_turns = len(valid_topic_turns)
         successful_turns = 0
         score_sum = 0
 
@@ -3006,13 +3041,13 @@ def generate_final_report():
             else:
                 verdict_counts['incorrect'] += 1
 
-            if v in ['correct', 'partially_correct'] or turn.get('passed'):
-                successful_turns += 1
+            if v != 'evaluation_unavailable':
+                if v in ['correct', 'partially_correct'] or turn.get('passed'):
+                    successful_turns += 1
+                score_sum += turn.get('score', 100 if v == 'correct' else 70 if v == 'partially_correct' else 30)
 
-            score_sum += turn.get('score', 100 if v == 'correct' else 70 if v == 'partially_correct' else 30)
-
-        success_rate_pct = int((successful_turns / total_turns) * 100) if total_turns > 0 else (75 if t['status'] == 'completed' else 50)
-        mastery_score = int(score_sum / total_turns) if total_turns > 0 else (t['masteryScore'] or success_rate_pct)
+        success_rate_pct = int((successful_turns / total_eval_turns) * 100) if total_eval_turns > 0 else (75 if t['status'] == 'completed' else 50)
+        mastery_score = int(score_sum / total_eval_turns) if total_eval_turns > 0 else (t['masteryScore'] or success_rate_pct)
 
         status = "Mastered" if (mastery_score >= 80 and success_rate_pct >= 75) else "Needs Improvement" if mastery_score >= 60 else "Weak"
 
@@ -3022,41 +3057,216 @@ def generate_final_report():
             'status': status,
             'masteryScore': mastery_score,
             'successRatePct': success_rate_pct,
-            'totalTurns': total_turns,
+            'totalTurns': len(turns),
+            'validTurns': total_eval_turns,
             'successfulTurns': successful_turns,
             'conceptsCovered': list(t['conceptsCovered']),
             'conceptsWrong': list(t['conceptsWrong']),
             'conceptsMissing': list(t['conceptsMissing'])
         })
 
+    # Consolidated misconceptions with evidence quote attribution
     consolidated_misconceptions = []
     seen_m = set()
-    for entry in eval_log:
+    for entry in valid_eval_turns:
         for m in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
             if m and m not in seen_m:
                 seen_m.add(m)
                 t_name = entry.get('topicName') or topic_map.get(entry.get('topicId'), {}).get('topicName', 'Technical Topic')
+                quote = (entry.get('evidenceQuote') or '').strip()
+                remediation = f"You said: '{quote}' — this reflects a gap in {m}." if quote else f"Review reference material for {t_name} to address misconception: '{m}'."
                 consolidated_misconceptions.append({
                     'misconception': m,
                     'topicId': entry.get('topicId'),
                     'topicName': t_name,
                     'turnIndex': entry.get('turnIndex', 1),
-                    'remediation': f"Review reference material for {t_name} to address misconception: '{m}'"
+                    'evidenceQuote': quote,
+                    'remediation': remediation
                 })
 
+    # Suggested revision areas with evidence quote attribution
     suggested_revisions = []
     seen_r = set()
     for tm in topic_mastery:
         for gap in tm['conceptsMissing']:
             if gap and gap not in seen_r:
                 seen_r.add(gap)
+                matching_turn = next((t for t in valid_eval_turns if gap in (t.get('conceptsMissing') or [])), None)
+                quote = (matching_turn.get('evidenceQuote') or '').strip() if matching_turn else ''
+                rec = f"You said: '{quote}' — this reflects a gap in {gap}." if quote else f"Study '{gap}' under {tm['topicName']}."
                 suggested_revisions.append({
                     'topicId': tm['topicId'],
                     'topicName': tm['topicName'],
                     'conceptGap': gap,
                     'priority': 'High' if tm['masteryScore'] < 60 else 'Medium',
-                    'recommendation': f"Study '{gap}' under {tm['topicName']}."
+                    'evidenceQuote': quote,
+                    'recommendation': rec
                 })
+
+    # --- 4 DETERMINISTIC DIMENSION CALCULATIONS ---
+    # 1. Technical answer correctness: 35% (from Evaluator verdicts across valid turns)
+    verdict_score_map = {
+        'correct': 100.0,
+        'partially_correct': 70.0,
+        'vague': 40.0,
+        'dont_know': 20.0,
+        'incorrect': 10.0,
+        'off_topic': 0.0
+    }
+    if valid_eval_turns:
+        tech_score = sum(verdict_score_map.get(t.get('verdict', 'incorrect'), 10.0) for t in valid_eval_turns) / len(valid_eval_turns)
+        tech_has_lower_conf = any(t.get('uncertainty') in ['medium', 'high'] for t in valid_eval_turns)
+        tech_uncertainty = 'high' if any(t.get('uncertainty') == 'high' for t in valid_eval_turns) else ('medium' if tech_has_lower_conf else 'low')
+    elif technical_mcq_results and technical_mcq_results.get('percentage') is not None:
+        tech_score = float(technical_mcq_results.get('percentage'))
+        tech_has_lower_conf = False
+        tech_uncertainty = 'low'
+    elif interview_results and interview_results.get('overallConfidence') is not None:
+        tech_score = float(interview_results.get('overallConfidence'))
+        tech_has_lower_conf = False
+        tech_uncertainty = 'low'
+    else:
+        tech_score = 75.0
+        tech_has_lower_conf = False
+        tech_uncertainty = 'low'
+
+    # 2. Problem-solving / reasoning: 25% (from conceptsCorrect vs conceptsMissing ratio across valid turns)
+    all_corr_set = set()
+    all_miss_set = set()
+    for entry in valid_eval_turns:
+        for c in (entry.get('conceptsCorrect') or entry.get('keyConceptsCovered') or []):
+            if c: all_corr_set.add(c)
+        for c in (entry.get('conceptsMissing') or entry.get('keyConceptGaps') or []):
+            if c: all_miss_set.add(c)
+
+    tot_concepts = len(all_corr_set) + len(all_miss_set)
+    if tot_concepts > 0:
+        ps_score = (len(all_corr_set) / tot_concepts) * 100.0
+    elif aptitude_results and aptitude_results.get('percentage') is not None:
+        ps_score = float(aptitude_results.get('percentage'))
+    else:
+        ps_score = 70.0
+    ps_has_lower_conf = tech_has_lower_conf
+    ps_uncertainty = tech_uncertainty
+
+    # 3. Coding correctness & complexity: 25% (from DSA round pass/fail + complexity analysis)
+    if dsa_results and isinstance(dsa_results, dict) and dsa_results.get('score') is not None:
+        base_dsa = float(dsa_results.get('score'))
+        is_opt = dsa_results.get('isOptimal') is not False and (dsa_results.get('codeEfficiency') or {}).get('isOptimal') is not False
+        if not is_opt:
+            coding_score = max(20.0, round(base_dsa * 0.75, 1))
+        else:
+            coding_score = round(base_dsa, 1)
+    else:
+        coding_score = 75.0
+    coding_has_lower_conf = False
+    coding_uncertainty = 'low'
+
+    # 4. Communication clarity: 15% (from filler words, pace, structure — NOT facial/gaze data)
+    comm_signals = []
+    if hr_results and hr_results.get('score') is not None:
+        comm_signals.append(float(hr_results.get('score')))
+    
+    perf = data.get('performanceAnalysis', {})
+    speech_tel = perf.get('speechTelemetry', {})
+    wpm = speech_tel.get('wordsPerMinute')
+    fillers = speech_tel.get('fillerWordCount')
+    if wpm is not None:
+        pace_score = 100.0 if 120 <= wpm <= 160 else max(40.0, 100.0 - abs(wpm - 140) * 0.8)
+        comm_signals.append(pace_score)
+    if fillers is not None:
+        filler_score = 100.0 if fillers <= 2 else max(40.0, 100.0 - fillers * 7.0)
+        comm_signals.append(filler_score)
+
+    if comm_signals:
+        comm_score = round(sum(comm_signals) / len(comm_signals), 1)
+    else:
+        comm_score = 75.0
+    comm_has_lower_conf = False
+    comm_uncertainty = 'low'
+
+    # Deterministic Composite Placement Readiness Score
+    deterministic_readiness_score = int(round(
+        0.35 * tech_score +
+        0.25 * ps_score +
+        0.25 * coding_score +
+        0.15 * comm_score
+    ))
+    deterministic_readiness_score = max(0, min(100, deterministic_readiness_score))
+
+    dimension_scores = {
+        'technicalCorrectness': {
+            'dimensionName': 'Technical Answer Correctness',
+            'score': round(tech_score, 1),
+            'weightPct': 35,
+            'weight': 0.35,
+            'uncertainty': tech_uncertainty,
+            'hasLowerConfidence': tech_has_lower_conf,
+            'source': 'Evaluator verdicts across interview turns'
+        },
+        'problemSolving': {
+            'dimensionName': 'Problem-Solving & Reasoning',
+            'score': round(ps_score, 1),
+            'weightPct': 25,
+            'weight': 0.25,
+            'uncertainty': ps_uncertainty,
+            'hasLowerConfidence': ps_has_lower_conf,
+            'source': 'Ratio of concepts correctly explained vs missed'
+        },
+        'codingCorrectnessComplexity': {
+            'dimensionName': 'Coding Correctness & Complexity',
+            'score': round(coding_score, 1),
+            'weightPct': 25,
+            'weight': 0.25,
+            'uncertainty': coding_uncertainty,
+            'hasLowerConfidence': coding_has_lower_conf,
+            'source': 'DSA round test execution and Big-O complexity optimality'
+        },
+        'communicationClarity': {
+            'dimensionName': 'Communication Clarity',
+            'score': round(comm_score, 1),
+            'weightPct': 15,
+            'weight': 0.15,
+            'uncertainty': comm_uncertainty,
+            'hasLowerConfidence': comm_has_lower_conf,
+            'source': 'Speech telemetry (pace, fillers, STAR structure; facial/gaze excluded)'
+        }
+    }
+
+    sub_scores = {
+        'technicalKnowledge': {
+            'score': round(tech_score / 10.0, 1),
+            'active': True,
+            'weight': 0.35,
+            'hasLowerConfidence': tech_has_lower_conf,
+            'uncertainty': tech_uncertainty,
+            'notes': 'Derived deterministically from Evaluator verdicts across turns (Weight: 35%).'
+        },
+        'problemSolving': {
+            'score': round(ps_score / 10.0, 1),
+            'active': True,
+            'weight': 0.25,
+            'hasLowerConfidence': ps_has_lower_conf,
+            'uncertainty': ps_uncertainty,
+            'notes': 'Derived deterministically from conceptsCorrect vs conceptsMissing ratio (Weight: 25%).'
+        },
+        'codingCorrectness': {
+            'score': round(coding_score / 10.0, 1),
+            'active': True,
+            'weight': 0.25,
+            'hasLowerConfidence': False,
+            'uncertainty': 'low',
+            'notes': 'Derived deterministically from DSA test cases & Big-O complexity analysis (Weight: 25%).'
+        },
+        'communication': {
+            'score': round(comm_score / 10.0, 1),
+            'active': True,
+            'weight': 0.15,
+            'hasLowerConfidence': False,
+            'uncertainty': 'low',
+            'notes': 'Derived deterministically from vocal pacing, fillers, and STAR structure (facial/gaze excluded) (Weight: 15%).'
+        }
+    }
 
     tier_info = get_company_tier_info(company_name)
 
@@ -3067,9 +3277,9 @@ def generate_final_report():
         "difficultyLevel": difficulty_level,
         "experienceLevel": experience_level,
         "experienceYears": experience_years,
-        "readinessScore": calculated_readiness_score,
-        "subScores": sub_scores,
-        "performanceAnalysis": performance_analysis,
+        "deterministicReadinessScore": deterministic_readiness_score,
+        "scoringFormulaVersion": SCORING_FORMULA_VERSION,
+        "dimensionScores": dimension_scores,
         "topicMastery": topic_mastery,
         "consolidatedMisconceptions": consolidated_misconceptions,
         "suggestedRevisionAreas": suggested_revisions,
@@ -3084,7 +3294,8 @@ def generate_final_report():
         else:
             dsa_complexity_context = f"\nDSA CODE COMPLEXITY NOTICE: Candidate submitted an OPTIMAL complexity solution ({dsa_results.get('timeComplexity', 'O(N)')})."
 
-    prompt = f"""You are the Chief Placement Officer evaluating a candidate's complete 7-stage placement simulation drive benchmarked against {company_name} ({tier_info['tierName']}).
+    # Gemini Prompt: Qualitative feedback ONLY — DO NOT ask LLM to produce or decide final overall score!
+    prompt = f"""You are the Chief Placement Officer providing qualitative diagnostic feedback on a candidate's complete 7-stage placement simulation drive benchmarked against {company_name} ({tier_info['tierName']}).
 
 {tier_info['strictnessPrompt']}
 
@@ -3094,16 +3305,15 @@ SESSION PERFORMANCE DATA:
 
 CRITICAL INSTRUCTIONS:
 1. Return ONLY valid raw JSON with NO markdown formatting, NO ```json code blocks, and NO preamble.
-2. Calculate/confirm a realistic readinessScore (around {calculated_readiness_score}).
-3. Provide a concise, highly professional 'readinessLabel' (e.g. "Placement Ready — Top 5% Candidate", "Strong Technical Fit — Communication Polish Needed", "Developing — High Growth Potential").
-4. Provide an 'executiveSummary' (3-4 sentences summarizing their performance across all completed rounds, overall hire probability, and key technical traits against {tier_info['tierName']} standards).
-5. Provide a 'roundBreakdown' array of objects, one per completed round in completedRounds ({list(active_rounds.keys())}), with roundName, score, and oneLineTakeaway.
+2. Do NOT calculate or decide the overall readiness score. The score is computed deterministically in application code ({deterministic_readiness_score}/100 using {SCORING_FORMULA_VERSION}).
+3. Provide a concise, highly professional 'readinessLabel' (e.g. "Placement Ready — High Hire Probability", "Strong Technical Fit — Communication Polish Needed", "Developing — High Growth Potential").
+4. Provide an 'executiveSummary' (3-4 sentences summarizing candidate performance across completed rounds, hire probability, and traits against {tier_info['tierName']} standards).
+5. Provide a 'roundBreakdown' array of objects for completed rounds ({list(active_rounds.keys())}), each with roundName, score, and oneLineTakeaway.
 6. Provide 'topPriorityActions': array of top 3 actionable steps to increase candidate hire probability.
 7. Provide 'encouragingClosingNote': a short (2 sentence) inspiring closing message motivating the candidate.
 
 Return this exact JSON structure:
 {{
-  "readinessScore": {calculated_readiness_score},
   "readinessLabel": "Placement Ready — High Hire Probability",
   "executiveSummary": "Candidate demonstrated strong problem-solving in coding and clear technical articulation...",
   "roundBreakdown": [
@@ -3139,154 +3349,55 @@ Return this exact JSON structure:
         breakdown.append({"roundName": "Stage 7: HR & Culture Fit Interview", "score": int(active_rounds['hr_interview']), "oneLineTakeaway": "Strong behavioral alignment and career vision."})
 
     if not breakdown:
-        breakdown.append({"roundName": "Interview Session Diagnostic", "score": calculated_readiness_score, "oneLineTakeaway": f"Evaluated across technical topics for {company_name} ({field_name})."})
+        breakdown.append({"roundName": "Interview Session Diagnostic", "score": deterministic_readiness_score, "oneLineTakeaway": f"Evaluated across technical topics for {company_name} ({field_name})."})
 
+    parsed_json = None
     raw_text = call_gemini(prompt)
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed_json = json.loads(cleaned_text)
-            parsed_json["companyTierInfo"] = tier_info
-            parsed_json["topicMastery"] = topic_mastery
-            parsed_json["consolidatedMisconceptions"] = consolidated_misconceptions
-            parsed_json["suggestedRevisionAreas"] = suggested_revisions
-            parsed_json["totalTurnsEvaluated"] = len(eval_log)
-            parsed_json["verdictCounts"] = verdict_counts
-            return jsonify(parsed_json)
         except Exception as e:
             print(f"Gemini API Exception in generate_final_report: {e}")
 
-    # Extract structured evaluationLog metrics directly from interviewSessions document (Prompt 2)
-    session_state = data.get('sessionState') or data.get('sessionResults') or {}
-    eval_log = session_state.get('evaluationLog', []) if isinstance(session_state, dict) else []
-    topic_plan = session_state.get('topicPlan', []) if isinstance(session_state, dict) else []
-    history_summary = session_state.get('historySummary', '') if isinstance(session_state, dict) else ''
+    if not parsed_json or not isinstance(parsed_json, dict):
+        parsed_json = {
+            "readinessLabel": f"Strong Candidate — {tier_info['tierName']} Benchmark" if deterministic_readiness_score >= 75 else "Developing Candidate — Targeted Polish Needed",
+            "executiveSummary": history_summary.strip() if history_summary.strip() else f"Candidate completed the {company_name} ({tier_info['tierName']}) placement drive for {field_name} with an overall interview score of {deterministic_readiness_score}/100. Performance evaluated against {tier_info['tierName']} hiring standards.",
+            "roundBreakdown": breakdown,
+            "topPriorityActions": [r['recommendation'] for r in suggested_revisions[:3]] if suggested_revisions else [
+              f"Master company-specific interview question patterns for {company_name}.",
+              "Refine vocal pacing and STAR structure during system architecture & HR questions.",
+              "Expand keyword optimization in resume to target ATS filters."
+            ],
+            "encouragingClosingNote": "Solid performance! Keep refining your core technical domains and communication drive."
+        }
 
-    topic_map = {}
-    for t in topic_plan:
-        tid = t.get('topicId')
-        if tid:
-            topic_map[tid] = {
-                'topicId': tid,
-                'topicName': t.get('topicName', tid),
-                'status': t.get('status', 'not_started'),
-                'masteryScore': t.get('mastery') or 75,
-                'turns': [],
-                'conceptsCovered': set(),
-                'conceptsWrong': set(),
-                'conceptsMissing': set()
-            }
+    # Deterministically enforce system-computed scores and traceability
+    parsed_json["readinessScore"] = deterministic_readiness_score
+    parsed_json["overallInterviewScore"] = deterministic_readiness_score
+    parsed_json["scoringFormulaName"] = SCORING_FORMULA_NAME
+    parsed_json["scoringFormulaVersion"] = SCORING_FORMULA_VERSION
+    parsed_json["dimensionScores"] = dimension_scores
+    parsed_json["subScores"] = sub_scores
+    parsed_json["companyTierInfo"] = tier_info
+    parsed_json["topicMastery"] = topic_mastery
+    parsed_json["consolidatedMisconceptions"] = consolidated_misconceptions
+    parsed_json["suggestedRevisionAreas"] = suggested_revisions
+    parsed_json["totalTurnsEvaluated"] = len(eval_log)
+    parsed_json["verdictCounts"] = verdict_counts
+    parsed_json["excludedTurnsCount"] = excluded_turns_count
+    parsed_json["fallbackQuestionsCount"] = fallback_questions_count
+    parsed_json["degradedEvaluationsNotice"] = (
+        f"{excluded_turns_count} response(s) could not be evaluated due to a temporary issue and were excluded from scoring."
+        if excluded_turns_count > 0 else None
+    )
+    parsed_json["fallbackQuestionsNotice"] = (
+        f"Note: {fallback_questions_count} question(s) in this session used a fallback due to a temporary AI service issue and were not fully personalized."
+        if fallback_questions_count > 0 else None
+    )
 
-    for entry in eval_log:
-        tid = entry.get('topicId') or session_state.get('currentTopicId', 'general-topic')
-        if tid not in topic_map:
-            topic_map[tid] = {
-                'topicId': tid,
-                'topicName': entry.get('topicName', tid),
-                'status': 'completed',
-                'masteryScore': entry.get('score', 75),
-                'turns': [],
-                'conceptsCovered': set(),
-                'conceptsWrong': set(),
-                'conceptsMissing': set()
-            }
-        t_obj = topic_map[tid]
-        t_obj['turns'].append(entry)
-        for c in (entry.get('conceptsCorrect') or entry.get('keyConceptsCovered') or []):
-            if c: t_obj['conceptsCovered'].add(c)
-        for c in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
-            if c: t_obj['conceptsWrong'].add(c)
-        for c in (entry.get('conceptsMissing') or entry.get('keyConceptGaps') or []):
-            if c: t_obj['conceptsMissing'].add(c)
-
-    topic_mastery = []
-    verdict_counts = {'correct': 0, 'partially_correct': 0, 'incorrect': 0, 'vague': 0, 'off_topic': 0, 'dont_know': 0}
-
-    for tid, t in topic_map.items():
-        turns = t['turns']
-        total_turns = len(turns)
-        successful_turns = 0
-        score_sum = 0
-
-        for turn in turns:
-            v = turn.get('verdict') or ('correct' if turn.get('passed') else 'incorrect')
-            if v in verdict_counts:
-                verdict_counts[v] += 1
-            else:
-                verdict_counts['incorrect'] += 1
-
-            if v in ['correct', 'partially_correct'] or turn.get('passed'):
-                successful_turns += 1
-
-            score_sum += turn.get('score', 100 if v == 'correct' else 70 if v == 'partially_correct' else 30)
-
-        success_rate_pct = int((successful_turns / total_turns) * 100) if total_turns > 0 else (75 if t['status'] == 'completed' else 50)
-        mastery_score = int(score_sum / total_turns) if total_turns > 0 else (t['masteryScore'] or success_rate_pct)
-
-        status = "Mastered" if (mastery_score >= 80 and success_rate_pct >= 75) else "Needs Improvement" if mastery_score >= 60 else "Weak"
-
-        topic_mastery.append({
-            'topicId': tid,
-            'topicName': t['topicName'],
-            'status': status,
-            'masteryScore': mastery_score,
-            'successRatePct': success_rate_pct,
-            'totalTurns': total_turns,
-            'successfulTurns': successful_turns,
-            'conceptsCovered': list(t['conceptsCovered']),
-            'conceptsWrong': list(t['conceptsWrong']),
-            'conceptsMissing': list(t['conceptsMissing'])
-        })
-
-    consolidated_misconceptions = []
-    seen_m = set()
-    for entry in eval_log:
-        for m in (entry.get('conceptsWrong') or entry.get('misconceptionsTriggered') or []):
-            if m and m not in seen_m:
-                seen_m.add(m)
-                t_name = entry.get('topicName') or topic_map.get(entry.get('topicId'), {}).get('topicName', 'Technical Topic')
-                consolidated_misconceptions.append({
-                    'misconception': m,
-                    'topicId': entry.get('topicId'),
-                    'topicName': t_name,
-                    'turnIndex': entry.get('turnIndex', 1),
-                    'remediation': f"Review reference material for {t_name} to address misconception: '{m}'"
-                })
-
-    suggested_revisions = []
-    seen_r = set()
-    for tm in topic_mastery:
-        for gap in tm['conceptsMissing']:
-            if gap and gap not in seen_r:
-                seen_r.add(gap)
-                suggested_revisions.append({
-                    'topicId': tm['topicId'],
-                    'topicName': tm['topicName'],
-                    'conceptGap': gap,
-                    'priority': 'High' if tm['masteryScore'] < 60 else 'Medium',
-                    'recommendation': f"Study '{gap}' under {tm['topicName']}."
-                })
-
-    return jsonify({
-        "readinessScore": calculated_readiness_score,
-        "overallInterviewScore": calculated_readiness_score,
-        "companyTierInfo": tier_info,
-        "subScores": sub_scores,
-        "readinessLabel": f"Strong Candidate — {tier_info['tierName']} Benchmark" if calculated_readiness_score >= 75 else "Developing Candidate — Targeted Polish Needed",
-        "executiveSummary": history_summary.strip() if history_summary.strip() else f"Candidate completed the {company_name} ({tier_info['tierName']}) placement drive for {field_name} with an overall interview score of {calculated_readiness_score}/100. Performance evaluated against {tier_info['tierName']} hiring standards.",
-        "roundBreakdown": breakdown,
-        "totalTurnsEvaluated": len(eval_log),
-        "verdictCounts": verdict_counts,
-        "topicMastery": topic_mastery,
-        "consolidatedMisconceptions": consolidated_misconceptions,
-        "suggestedRevisionAreas": suggested_revisions,
-        "topPriorityActions": [r['recommendation'] for r in suggested_revisions[:3]] if suggested_revisions else [
-          f"Master company-specific interview question patterns for {company_name}.",
-          "Refine vocal pacing and STAR structure during system architecture & HR questions.",
-          "Expand keyword optimization in resume to target ATS filters."
-        ],
-        "encouragingClosingNote": "Solid performance! Keep refining your core technical domains and communication drive."
-    })
+    return jsonify(parsed_json)
 
 
 

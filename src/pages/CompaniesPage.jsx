@@ -23,7 +23,9 @@ import {
   Check,
   Globe,
   Users,
-  UserCheck
+  UserCheck,
+  Star,
+  Info
 } from 'lucide-react';
 
 export default function CompaniesPage() {
@@ -135,6 +137,10 @@ export default function CompaniesPage() {
           <p className="text-xs sm:text-sm text-warmtext-500">
             Configure candidate experience level and difficulty tier, then select a recruiter to launch your custom placement drive.
           </p>
+          <div className="flex items-center gap-1.5 text-[11px] text-warmtext-500 pt-1 italic font-sans">
+            <Info className="w-3.5 h-3.5 text-rust-500 shrink-0" />
+            <span>Based on publicly available interview experience reports.</span>
+          </div>
         </div>
 
         {/* Seeder Button */}
@@ -544,58 +550,95 @@ export default function CompaniesPage() {
         );
       })()}
 
+      {/* Recommended Demo Recruiters Banner */}
+      <div className="rounded-2xl p-4 sm:p-5 bg-[#FDF4EC] border-2 border-rust-300 shadow-warm-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-rust-500 text-white flex items-center justify-center shrink-0 shadow-warm-xs">
+            <Star className="w-5 h-5 fill-current" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs sm:text-sm font-bold font-serif text-warmtext-900">Recommended Demo Recruiters</h3>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rust-100 text-rust-700 border border-rust-300 font-mono">
+                Most polished experience
+              </span>
+            </div>
+            <p className="text-[11px] text-warmtext-600 mt-0.5">
+              Judges & evaluators: <strong>Google</strong> (algorithmic rigor + system design) and <strong>Amazon</strong> (Leadership Principles + testing scenarios) provide our deepest rubric coverage, live code tests, and evidence-anchored feedback.
+            </p>
+          </div>
+        </div>
+        <span className="text-[11px] text-warmtext-500 font-mono shrink-0 italic">
+          All 20 recruiters selectable
+        </span>
+      </div>
+
       {/* 20 Companies Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCompanies.map((company) => (
-          <div
-            key={company.id}
-            onClick={() => setActiveInsightCompany(company.name)}
-            className={`card-interactive rounded-2xl bg-[#FDF4EC] p-6 flex flex-col justify-between space-y-6 border group ${
-              activeInsightCompany === company.name
-                ? 'border-rust-500 border-l-4 border-l-rust-500 shadow-glow-rust'
-                : 'border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm'
-            }`}
-          >
-            
-            <div className="space-y-4">
+        {filteredCompanies.map((company) => {
+          const isRecommendedDemo = ['Google', 'Amazon', 'Microsoft'].includes(company.name);
+
+          return (
+            <div
+              key={company.id}
+              onClick={() => setActiveInsightCompany(company.name)}
+              className={`card-interactive rounded-2xl bg-[#FDF4EC] p-6 flex flex-col justify-between space-y-6 border group ${
+                activeInsightCompany === company.name
+                  ? 'border-rust-500 border-l-4 border-l-rust-500 shadow-glow-rust'
+                  : isRecommendedDemo
+                  ? 'border-rust-300 border-l-4 border-l-rust-500 shadow-warm-sm ring-1 ring-rust-200'
+                  : 'border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm'
+              }`}
+            >
               
-              {/* Card Top Bar */}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="icon-badge w-12 h-12 rounded-xl bg-rust-100 text-rust-500 border border-warmborder font-bold font-serif text-lg shadow-warm-sm">
-                    {company.logoText}
+              <div className="space-y-4">
+                
+                {/* Recommended Demo Badge */}
+                {isRecommendedDemo && (
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rust-500 text-white text-[10px] font-extrabold shadow-warm-xs uppercase tracking-wide">
+                    <Star className="w-3 h-3 fill-current" />
+                    <span>Recommended Demo Path • Most polished experience</span>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-bold font-serif text-warmtext-900 group-hover:text-rust-500 transition-colors">{company.name}</h3>
-                    <span className="text-[10px] text-rust-500 font-semibold">{company.category || 'Recruiter Track'}</span>
+                )}
+
+                {/* Card Top Bar */}
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="icon-badge w-12 h-12 rounded-xl bg-rust-100 text-rust-500 border border-warmborder font-bold font-serif text-lg shadow-warm-sm">
+                      {company.logoText}
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold font-serif text-warmtext-900 group-hover:text-rust-500 transition-colors">{company.name}</h3>
+                      <span className="text-[10px] text-rust-500 font-semibold">{company.category || 'Recruiter Track'}</span>
+                    </div>
                   </div>
+
+                  <span className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase border ${
+                    company.difficulty === 'Hard'
+                      ? 'bg-rust-100 text-rust-700 border-rust-200'
+                      : company.difficulty === 'Medium'
+                      ? 'bg-dustyrose-100 text-dustyrose-700 border-dustyrose-200'
+                      : 'bg-peach-100 text-warmtext-700 border-warmborder'
+                  }`}>
+                    {company.difficulty}
+                  </span>
                 </div>
 
-                <span className={`px-3 py-1 rounded-full text-[10px] font-extrabold uppercase border ${
-                  company.difficulty === 'Hard'
-                    ? 'bg-rust-100 text-rust-700 border-rust-200'
-                    : company.difficulty === 'Medium'
-                    ? 'bg-dustyrose-100 text-dustyrose-700 border-dustyrose-200'
-                    : 'bg-peach-100 text-warmtext-700 border-warmborder'
-                }`}>
-                  {company.difficulty}
-                </span>
-              </div>
-
-              {/* Description */}
-              <p className="text-xs text-warmtext-500 leading-relaxed bg-white p-3.5 rounded-xl border border-warmborder shadow-warm-sm">
-                {company.description}
-              </p>
-
-              {/* What to Expect Callout Line */}
-              <div className="p-3.5 rounded-xl bg-peach-100 border border-warmborder text-xs space-y-1">
-                <div className="text-[10px] font-extrabold text-rust-500 uppercase tracking-wider flex items-center gap-1">
-                  <Target className="w-3 h-3" /> What To Expect:
-                </div>
-                <p className="text-warmtext-900 leading-normal text-[11px]">
-                  {company.dsaProfile?.notes || company.interviewProfile?.notes || 'Comprehensive hiring assessment.'}
+                {/* Description */}
+                <p className="text-xs text-warmtext-500 leading-relaxed bg-white p-3.5 rounded-xl border border-warmborder shadow-warm-sm">
+                  {company.description}
                 </p>
-              </div>
+
+                {/* What to Expect Callout Line */}
+                <div className="p-3.5 rounded-xl bg-peach-100 border border-warmborder text-xs space-y-1">
+                  <div className="text-[10px] font-extrabold text-rust-500 uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1"><Target className="w-3 h-3" /> What To Expect:</span>
+                    <span className="text-[9px] text-warmtext-500 font-normal italic">Based on publicly available reports</span>
+                  </div>
+                  <p className="text-warmtext-900 leading-normal text-[11px]">
+                    {company.dsaProfile?.notes || company.interviewProfile?.notes || 'Comprehensive hiring assessment.'}
+                  </p>
+                </div>
 
               {/* Round Details Pill */}
               <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -636,7 +679,8 @@ export default function CompaniesPage() {
             </button>
 
           </div>
-        ))}
+          );
+        })}
       </div>
 
     </div>

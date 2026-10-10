@@ -68,6 +68,7 @@ export default function HrInterviewRoundPage() {
     selectedCompany, 
     setRoundIndex, 
     addAnswerResult,
+    setSessionState: setGlobalSessionState,
     setHrInterviewResult, 
     hrInterviewResult: savedHrResult, 
     difficultyLevel,
@@ -99,6 +100,7 @@ export default function HrInterviewRoundPage() {
   const [hasStartedSession, setHasStartedSession] = useState(false);
   const [sessionState, setSessionState] = useState(null);
   const sessionStateRef = useRef(null); // mirrors sessionState for sync access in async handlers
+  const currentQuestionIsFallbackRef = useRef(false);
   const [isFinished, setIsFinished] = useState(false);
   const [hrResult, setHrResult] = useState(savedHrResult);
 
@@ -415,7 +417,8 @@ export default function HrInterviewRoundPage() {
       // Save only question IDs selected for this current session into recent tracking
       saveRecentHrQuestionIds(questionsBank.slice(0, 8).map(q => q.id));
 
-      let initialGreeting = null;
+      let openingRes = null;
+      let isFallbackOpening = false;
       try {
         console.log('[OpeningTurn Debug: HR] 4. Awaiting executeOpeningTurn (/api/generate-question)...');
         const openingPromise = executeOpeningTurn({
@@ -426,17 +429,25 @@ export default function HrInterviewRoundPage() {
         const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('executeOpeningTurn timeout')), 10000)
         );
-        initialGreeting = await Promise.race([openingPromise, timeoutPromise]);
-        console.log('[OpeningTurn Debug: HR] 5. executeOpeningTurn completed. Opening text:', initialGreeting);
+        openingRes = await Promise.race([openingPromise, timeoutPromise]);
+        console.log('[OpeningTurn Debug: HR] 5. executeOpeningTurn completed. Opening text:', openingRes);
       } catch (opErr) {
         console.warn('[OpeningTurn Debug: HR] 5. HR executeOpeningTurn notice:', opErr.message);
+      }
+
+      let initialGreeting = null;
+      if (openingRes) {
+        initialGreeting = typeof openingRes === 'object' ? (openingRes.question || String(openingRes)) : openingRes;
+        isFallbackOpening = Boolean(openingRes.isFallbackQuestion || openingRes.isFallback);
       }
 
       if (!initialGreeting) {
         console.log('[OpeningTurn Debug: HR] 6. Using initial fallback opening question.');
         const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
         initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
+        isFallbackOpening = true;
       }
+      currentQuestionIsFallbackRef.current = isFallbackOpening;
       
       console.log('[OpeningTurn Debug: HR] 7. Setting opening question and resetting aiState to idle.');
       setCurrentSpokenQuestion(initialGreeting);
@@ -561,7 +572,8 @@ export default function HrInterviewRoundPage() {
           roundType: 'hr',
           currentTopicId: activeSession?.currentTopicId || 'behavioral-handling-conflict',
           backendUrl: getBackendUrl(),
-          signal: controller.signal
+          signal: controller.signal,
+          isFallbackQuestion: currentQuestionIsFallbackRef.current
         });
 
         clearTimeout(fetchTimeout);
@@ -573,8 +585,28 @@ export default function HrInterviewRoundPage() {
             console.log('[HrInterviewRoundPage] [setState START] setSessionState with updated session state');
             setSessionState(turnResult.updatedSessionState);
             sessionStateRef.current = turnResult.updatedSessionState;
+            if (typeof setGlobalSessionState === 'function') {
+              setGlobalSessionState(turnResult.updatedSessionState);
+            }
             console.log('[HrInterviewRoundPage] [setState COMPLETE] setSessionState updated');
           }
+          if (turnResult.evaluatorOutput) {
+            addAnswerResult({
+              questionId: `hr-q-${totalExchanges}`,
+              evidenceQuote: turnResult.evaluatorOutput.evidenceQuote,
+              verdict: turnResult.evaluatorOutput.verdict,
+              conceptsCorrect: turnResult.evaluatorOutput.conceptsCorrect,
+              conceptsWrong: turnResult.evaluatorOutput.conceptsWrong,
+              conceptsMissing: turnResult.evaluatorOutput.conceptsMissing,
+              uncertainty: turnResult.evaluatorOutput.uncertainty,
+              modelUsed: turnResult.evaluatorOutput.modelUsed,
+              rubricVersion: turnResult.evaluatorOutput.rubricVersion,
+              reason: turnResult.evaluatorOutput.reason,
+              isFallbackQuestion: currentQuestionIsFallbackRef.current,
+              degraded: Boolean(turnResult.evaluatorOutput.degraded)
+            });
+          }
+          currentQuestionIsFallbackRef.current = Boolean(turnResult.isFallbackQuestion);
         }
       } catch (err) {
         clearTimeout(fetchTimeout);
@@ -639,10 +671,12 @@ export default function HrInterviewRoundPage() {
               const unusedFromBank = questionsBank.find(q => !isDuplicate(q.question));
               if (unusedFromBank) {
                 nextText = unusedFromBank.question;
+                currentQuestionIsFallbackRef.current = true;
                 console.log('[Anti-Repetition Safeguard: HR] Substituted with fresh question from question bank:', nextText);
               } else {
                 const unusedInitial = INITIAL_HR_QUESTIONS.find(q => !isDuplicate(q.question));
                 nextText = unusedInitial ? unusedInitial.question : `Let's discuss another key aspect of your engineering background. What is a complex project milestone you recently delivered?`;
+                currentQuestionIsFallbackRef.current = true;
                 console.log('[Anti-Repetition Safeguard: HR] Substituted with fresh fallback question:', nextText);
               }
             }

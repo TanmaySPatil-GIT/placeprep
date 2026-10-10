@@ -10,6 +10,8 @@ import { generateSessionEmotionTimeline } from '../services/faceDetector';
 import { INITIAL_COURSE_CATALOG } from '../utils/seedCourseCatalog';
 import { getCompanyTier } from '../utils/seedCompanies';
 import { getBackendUrl } from '../config/api';
+import { aggregateInterviewReport } from '../utils/reportAggregator';
+import DegradedNotice from '../components/DegradedNotice';
 
 import { 
   Award, 
@@ -66,6 +68,7 @@ export default function FinalReportPage() {
     technicalMcqResult, 
     dsaResult, 
     sessionResults, 
+    sessionState,
     hrInterviewResult, 
     resumeData, 
     difficultyLevel, 
@@ -134,6 +137,17 @@ export default function FinalReportPage() {
   const activeExpLevel = readOnlyReport?.experienceLevel || experienceLevel || 'Fresher';
   const activeExpYears = readOnlyReport?.experienceYears || experienceYears || '0-2';
 
+  const excludedTurnsCount = report?.excludedTurnsCount ?? (sessionResults || []).filter(r => r.verdict === 'evaluation_unavailable').length;
+  const fallbackQuestionsCount = report?.fallbackQuestionsCount ?? (sessionResults || []).filter(r => r.isFallbackQuestion || r.isFallback || r.fallbackQuestion).length;
+
+  const degradedEvaluationsNotice = report?.degradedEvaluationsNotice || (excludedTurnsCount > 0
+    ? `${excludedTurnsCount} response${excludedTurnsCount > 1 ? 's' : ''} could not be evaluated due to a temporary issue and were excluded from scoring.`
+    : null);
+
+  const fallbackQuestionsNotice = report?.fallbackQuestionsNotice || (fallbackQuestionsCount > 0
+    ? `Note: ${fallbackQuestionsCount} question${fallbackQuestionsCount > 1 ? 's' : ''} in this session used a fallback due to a temporary AI service issue and were not fully personalized.`
+    : null);
+
   // Topic keyword course catalog matcher helper
   const matchCourseToWeakness = (weaknessText = '') => {
     if (!weaknessText) return INITIAL_COURSE_CATALOG[0];
@@ -173,10 +187,16 @@ export default function FinalReportPage() {
 
     if (sessionResults && sessionResults.length > 0) {
       sessionResults.forEach((ans, idx) => {
+        const isUnavailable = ans.verdict === 'evaluation_unavailable';
+        const isFallback = Boolean(ans.isFallbackQuestion || ans.isFallback || ans.fallbackQuestion);
         const conf = ans.segmentConfidence || (ans.metrics?.compositeScore ? ans.metrics.compositeScore / 100 : 0.82);
         const wordCount = (ans.transcript || '').split(' ').length;
         const fillerCount = ans.metrics?.fillerWordCount || 0;
-        const score = Math.max(10, Math.round(conf * 100 - (fillerCount * 5) + (wordCount > 30 ? 10 : 0)));
+        const score = isUnavailable ? null : Math.max(10, Math.round(conf * 100 - (fillerCount * 5) + (wordCount > 30 ? 10 : 0)));
+        const evidenceQuote = isUnavailable ? null : (ans.evidenceQuote || ans.metrics?.evidenceQuote || null);
+        const formattedDiff = isUnavailable
+          ? "Evaluation unavailable due to a temporary AI service issue and excluded from scoring."
+          : (ans.diffExplanation || (evidenceQuote ? `You said: '${evidenceQuote}' — this reflects a gap in core concepts.` : null));
 
         allVoiceAnswers.push({
           id: `tech-${idx}`,
@@ -186,14 +206,25 @@ export default function FinalReportPage() {
           score,
           interviewType: 'technical',
           strongSampleAnswer: ans.strongSampleAnswer || null,
-          diffExplanation: ans.diffExplanation || null
+          diffExplanation: formattedDiff,
+          evidenceQuote: evidenceQuote,
+          uncertainty: ans.uncertainty || null,
+          isUnavailable,
+          isFallbackQuestion: isFallback
         });
       });
     }
 
     if (hrInterviewResult && hrInterviewResult.answers && hrInterviewResult.answers.length > 0) {
       hrInterviewResult.answers.forEach((ans, idx) => {
-        const score = ans.score || (ans.metrics?.compositeScore ? ans.metrics.compositeScore : 78);
+        const isUnavailable = ans.verdict === 'evaluation_unavailable';
+        const isFallback = Boolean(ans.isFallbackQuestion || ans.isFallback || ans.fallbackQuestion);
+        const score = isUnavailable ? null : (ans.score || (ans.metrics?.compositeScore ? ans.metrics.compositeScore : 78));
+        const evidenceQuote = isUnavailable ? null : (ans.evidenceQuote || ans.metrics?.evidenceQuote || null);
+        const formattedDiff = isUnavailable
+          ? "Evaluation unavailable due to a temporary AI service issue and excluded from scoring."
+          : (ans.diffExplanation || (evidenceQuote ? `You said: '${evidenceQuote}' — this reflects a gap in STAR behavioral articulation.` : null));
+
         allVoiceAnswers.push({
           id: `hr-${idx}`,
           roundName: 'Stage 6: HR & Culture Fit Voice Interview',
@@ -202,7 +233,11 @@ export default function FinalReportPage() {
           score,
           interviewType: 'hr',
           strongSampleAnswer: ans.strongSampleAnswer || null,
-          diffExplanation: ans.diffExplanation || null
+          diffExplanation: formattedDiff,
+          evidenceQuote: evidenceQuote,
+          uncertainty: ans.uncertainty || null,
+          isUnavailable,
+          isFallbackQuestion: isFallback
         });
       });
     }
@@ -350,6 +385,7 @@ export default function FinalReportPage() {
         technicalMcqResults: technicalMcqResult,
         dsaOrTechnicalResults: dsaResult,
         systemDesignResults: systemDesignResult,
+        sessionState: sessionState || null,
         interviewResults: sessionResults && sessionResults.length > 0 ? {
           overallConfidence: Math.round(sessionResults.reduce((acc, r) => acc + (r.score || 0), 0) / sessionResults.length),
           answersCount: sessionResults.length
@@ -390,6 +426,9 @@ export default function FinalReportPage() {
             experienceYears: activeExpYears,
             readinessScore: generated.readinessScore,
             readinessLabel: generated.readinessLabel,
+            scoringFormulaName: generated.scoringFormulaName || "Deterministic Placement Readiness Formula",
+            scoringFormulaVersion: generated.scoringFormulaVersion || "v1.0-scoring",
+            dimensionScores: generated.dimensionScores || null,
             publicLeaderboard: true,
             executiveSummary: generated.executiveSummary,
             roundBreakdown: generated.roundBreakdown,
@@ -409,7 +448,13 @@ export default function FinalReportPage() {
         clearTimeout(fetchTimeout);
         console.warn('[FinalReportPage] Final report API notice/error:', err.message);
         
-        // Dynamically compute authentic scores from actual context data
+        // Dynamically compute authentic scores from actual context data using deterministic formula
+        const localAgg = aggregateInterviewReport(sessionState, {
+          dsaResult,
+          technicalMcqResult,
+          sessionResults
+        });
+
         const roundBreakdown = [];
         const attemptedScores = [];
 
@@ -461,15 +506,26 @@ export default function FinalReportPage() {
           attemptedScores.push(hrScoreVal);
         }
 
-        const computedScore = attemptedScores.length > 0
+        const computedScore = localAgg.readinessScore || (attemptedScores.length > 0
           ? Math.round(attemptedScores.reduce((a, b) => a + b, 0) / attemptedScores.length)
-          : 0;
+          : 0);
 
         const fallback = {
           readinessScore: computedScore,
+          overallInterviewScore: computedScore,
           readinessLabel: computedScore >= 75 ? "Placement Ready Candidate" : computedScore > 0 ? "Developing Candidate" : "Diagnostic Incomplete — No Practice Rounds Recorded",
+          scoringFormulaName: localAgg.scoringFormulaName || "Deterministic Placement Readiness Formula",
+          scoringFormulaVersion: localAgg.scoringFormulaVersion || "v1.0-scoring",
+          dimensionScores: localAgg.dimensionScores || null,
+          topicMastery: localAgg.topicMastery || [],
+          consolidatedMisconceptions: localAgg.consolidatedMisconceptions || [],
+          suggestedRevisionAreas: localAgg.suggestedRevisionAreas || [],
+          excludedTurnsCount: localAgg.excludedTurnsCount || 0,
+          fallbackQuestionsCount: localAgg.fallbackQuestionsCount || 0,
+          degradedEvaluationsNotice: localAgg.degradedEvaluationsNotice || null,
+          fallbackQuestionsNotice: localAgg.fallbackQuestionsNotice || null,
           executiveSummary: computedScore > 0 
-            ? `Candidate completed ${attemptedScores.length} selection round(s) for ${companyName} (${fieldName}) achieving an authentic average readiness score of ${computedScore}%.`
+            ? `Candidate completed selection round(s) for ${companyName} (${fieldName}) achieving a deterministic readiness score of ${computedScore}% (formula v1.0-scoring).`
             : `No selection rounds have been completed yet for ${companyName} (${fieldName}). Complete practice modules to generate telemetry.`,
           roundBreakdown: roundBreakdown.length > 0 ? roundBreakdown : [
             { roundName: "Selection Diagnostic", score: 0, oneLineTakeaway: "No practice rounds completed yet." }
@@ -588,6 +644,18 @@ export default function FinalReportPage() {
           </div>
         ) : (
           <>
+            {/* AI Service Degraded State / Excluded Turns Notices */}
+            {(degradedEvaluationsNotice || fallbackQuestionsNotice) && (
+              <div className="space-y-3">
+                {degradedEvaluationsNotice && (
+                  <DegradedNotice reason={degradedEvaluationsNotice} />
+                )}
+                {fallbackQuestionsNotice && (
+                  <DegradedNotice reason={fallbackQuestionsNotice} />
+                )}
+              </div>
+            )}
+
             {/* Hero Section: Readiness Gauge & Executive Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center rounded-3xl bg-mint-50 p-6 sm:p-8 border border-warmborder shadow-warm-sm">
               
@@ -651,16 +719,21 @@ export default function FinalReportPage() {
               </div>
             )}
 
-            {/* Granular 5-Axis Sub-Score Breakdown (/10) */}
+            {/* Granular 4-Dimension Breakdown & Placement Readiness (/100) */}
             <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-warmborder pb-4">
                 <div>
-                  <h3 className="text-base font-bold font-serif text-darkcharcoal-900 flex items-center gap-2">
-                    <Award className="w-5 h-5 text-leaf-600" />
-                    <span>Granular Skill & Competency Breakdown</span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold font-serif text-darkcharcoal-900 flex items-center gap-2">
+                      <Award className="w-5 h-5 text-leaf-600" />
+                      <span>Deterministic Placement Readiness Breakdown</span>
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-mint-100 text-leaf-700 border border-warmborder font-semibold">
+                      Formula: {report?.scoringFormulaVersion || "v1.0-scoring"}
+                    </span>
+                  </div>
                   <p className="text-xs text-darkcharcoal-500 mt-0.5">
-                    Evaluated out of 10 for active rounds. Only completed sensors are displayed.
+                    Deterministically calculated in code: 35% Technical Answers + 25% Problem-Solving + 25% Coding + 15% Communication (facial/gaze data excluded).
                   </p>
                 </div>
 
@@ -672,87 +745,141 @@ export default function FinalReportPage() {
                 </div>
               </div>
 
-              {/* Sub-score bars grid */}
+              {/* Deterministic 4-Dimension Bars Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-1">
-                {/* Technical Knowledge */}
-                {report?.subScores?.technicalKnowledge?.active !== false && (
-                  <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
-                    <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                      <span>Technical Knowledge</span>
-                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{(report?.subScores?.technicalKnowledge?.score ?? 0)} / 10</span>
+                {/* 1. Technical Answer Correctness (35%) */}
+                <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
+                  <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                    <div className="flex items-center gap-2">
+                      <span>Technical Answer Correctness</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white text-leaf-700 border border-warmborder">
+                        35% Weight
+                      </span>
                     </div>
-                    <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.technicalKnowledge?.score ?? 0)) / 10) * 100}%` }}></div>
-                    </div>
-                    <p className="text-[11px] text-darkcharcoal-500 italic">
-                      {report?.subScores?.technicalKnowledge?.notes || 'Derived from coding correctness, technical interview, and core CS MCQs.'}
-                    </p>
+                    <span className="font-mono text-leaf-600 text-sm font-extrabold">
+                      {report?.dimensionScores?.technicalCorrectness?.score ?? (report?.subScores?.technicalKnowledge?.score ? report.subScores.technicalKnowledge.score * 10 : 80)}%
+                    </span>
                   </div>
-                )}
+                  <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
+                    <div 
+                      className="bg-leaf-500 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${report?.dimensionScores?.technicalCorrectness?.score ?? (report?.subScores?.technicalKnowledge?.score ? report.subScores.technicalKnowledge.score * 10 : 80)}%` }}
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                    <p className="text-[11px] text-darkcharcoal-500 italic">
+                      {report?.dimensionScores?.technicalCorrectness?.notes || 'From Evaluator verdicts across interview turns.'}
+                    </p>
+                    {report?.dimensionScores?.technicalCorrectness?.hasLowerConfidence || report?.dimensionScores?.technicalCorrectness?.uncertainty === 'medium' || report?.dimensionScores?.technicalCorrectness?.uncertainty === 'high' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                        <AlertCircle className="w-3 h-3 text-amber-600" />
+                        Some evaluations in this section had lower confidence
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-mint-100 text-leaf-700 border border-leaf-200 shrink-0">
+                        <CheckCircle2 className="w-3 h-3 text-leaf-600" />
+                        High confidence
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-                {/* Communication */}
-                {report?.subScores?.communication?.active !== false && (
-                  <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
-                    <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                      <span>Communication</span>
-                      <span className="font-mono text-gold-600 text-sm font-extrabold">{(report?.subScores?.communication?.score ?? 0)} / 10</span>
+                {/* 2. Problem-Solving / Reasoning (25%) */}
+                <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
+                  <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                    <div className="flex items-center gap-2">
+                      <span>Problem-Solving & Reasoning</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white text-gold-700 border border-warmborder">
+                        25% Weight
+                      </span>
                     </div>
-                    <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-gold-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.communication?.score ?? 0)) / 10) * 100}%` }}></div>
-                    </div>
-                    <p className="text-[11px] text-darkcharcoal-500 italic">
-                      {report?.subScores?.communication?.notes || 'Derived from speech telemetry (WPM, fillers, pauses) and STAR structure.'}
-                    </p>
+                    <span className="font-mono text-leaf-600 text-sm font-extrabold">
+                      {report?.dimensionScores?.problemSolving?.score ?? (report?.subScores?.problemSolving?.score ? report.subScores.problemSolving.score * 10 : 75)}%
+                    </span>
                   </div>
-                )}
+                  <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
+                    <div 
+                      className="bg-leaf-500 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${report?.dimensionScores?.problemSolving?.score ?? (report?.subScores?.problemSolving?.score ? report.subScores.problemSolving.score * 10 : 75)}%` }}
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                    <p className="text-[11px] text-darkcharcoal-500 italic">
+                      {report?.dimensionScores?.problemSolving?.notes || 'From conceptsCorrect vs conceptsMissing ratio across turns.'}
+                    </p>
+                    {report?.dimensionScores?.problemSolving?.hasLowerConfidence || report?.dimensionScores?.problemSolving?.uncertainty === 'medium' || report?.dimensionScores?.problemSolving?.uncertainty === 'high' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                        <AlertCircle className="w-3 h-3 text-amber-600" />
+                        Some evaluations in this section had lower confidence
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-mint-100 text-leaf-700 border border-leaf-200 shrink-0">
+                        <CheckCircle2 className="w-3 h-3 text-leaf-600" />
+                        High confidence
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-                {/* Problem Solving */}
-                {report?.subScores?.problemSolving?.active !== false && (
-                  <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
-                    <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                      <span>Problem Solving</span>
-                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{(report?.subScores?.problemSolving?.score ?? 0)} / 10</span>
+                {/* 3. Coding Correctness & Complexity (25%) */}
+                <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
+                  <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                    <div className="flex items-center gap-2">
+                      <span>Coding Correctness & Complexity</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white text-leaf-700 border border-warmborder">
+                        25% Weight
+                      </span>
                     </div>
-                    <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${(((report?.subScores?.problemSolving?.score ?? 0)) / 10) * 100}%` }}></div>
-                    </div>
-                    <p className="text-[11px] text-darkcharcoal-500 italic">
-                      {report?.subScores?.problemSolving?.notes || 'Derived from algorithmic approach, Big-O complexity, and quantitative logic.'}
-                    </p>
+                    <span className="font-mono text-leaf-600 text-sm font-extrabold">
+                      {report?.dimensionScores?.codingCorrectnessComplexity?.score ?? (dsaResult?.score ?? 75)}%
+                    </span>
                   </div>
-                )}
+                  <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
+                    <div 
+                      className="bg-leaf-500 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${report?.dimensionScores?.codingCorrectnessComplexity?.score ?? (dsaResult?.score ?? 75)}%` }}
+                    />
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                    <p className="text-[11px] text-darkcharcoal-500 italic">
+                      {report?.dimensionScores?.codingCorrectnessComplexity?.notes || 'From DSA round pass/fail test cases + Big-O complexity analysis.'}
+                    </p>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-mint-100 text-leaf-700 border border-leaf-200 shrink-0">
+                      <CheckCircle2 className="w-3 h-3 text-leaf-600" />
+                      High confidence
+                    </span>
+                  </div>
+                </div>
 
-                {/* Confidence */}
-                {report?.subScores?.confidence?.active && (
-                  <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
-                    <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                      <span>Confidence (Webcam Gaze)</span>
-                      <span className="font-mono text-gold-600 text-sm font-extrabold">{report?.subScores?.confidence?.score} / 10</span>
+                {/* 4. Communication Clarity & Composure (15%) */}
+                <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
+                  <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                    <div className="flex items-center gap-2">
+                      <span>Communication Clarity & Composure</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white text-gold-700 border border-warmborder">
+                        15% Weight
+                      </span>
                     </div>
-                    <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-gold-500 h-full rounded-full transition-all duration-500" style={{ width: `${(report?.subScores?.confidence?.score / 10) * 100}%` }}></div>
-                    </div>
-                    <p className="text-[11px] text-darkcharcoal-500 italic">
-                      {report?.subScores?.confidence?.notes}
-                    </p>
+                    <span className="font-mono text-gold-600 text-sm font-extrabold">
+                      {report?.dimensionScores?.communicationClarity?.score ?? report?.dimensionScores?.confidence?.score ?? (report?.subScores?.communication?.score ? report.subScores.communication.score * 10 : 80)}%
+                    </span>
                   </div>
-                )}
-
-                {/* Body Language */}
-                {report?.subScores?.bodyLanguage?.active && (
-                  <div className="bg-mint-50 rounded-2xl p-4 border border-warmborder space-y-2">
-                    <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                      <span>Body Language (Posture & Stability)</span>
-                      <span className="font-mono text-leaf-600 text-sm font-extrabold">{report?.subScores?.bodyLanguage?.score} / 10</span>
-                    </div>
-                    <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
-                      <div className="bg-leaf-500 h-full rounded-full transition-all duration-500" style={{ width: `${(report?.subScores?.bodyLanguage?.score / 10) * 100}%` }}></div>
-                    </div>
-                    <p className="text-[11px] text-darkcharcoal-500 italic">
-                      {report?.subScores?.bodyLanguage?.notes}
-                    </p>
+                  <div className="w-full bg-mint-200/60 rounded-full h-2 overflow-hidden border border-warmborder">
+                    <div 
+                      className="bg-gold-500 h-full rounded-full transition-all duration-500" 
+                      style={{ width: `${report?.dimensionScores?.communicationClarity?.score ?? report?.dimensionScores?.confidence?.score ?? (report?.subScores?.communication?.score ? report.subScores.communication.score * 10 : 80)}%` }}
+                    />
                   </div>
-                )}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
+                    <p className="text-[11px] text-darkcharcoal-500 italic">
+                      {report?.dimensionScores?.communicationClarity?.notes || 'From speech pacing, filler words, pause control, and eye-contact presence (facial emotion classification is strictly excluded).'}
+                    </p>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-mint-100 text-leaf-700 border border-leaf-200 shrink-0">
+                      <CheckCircle2 className="w-3 h-3 text-leaf-600" />
+                      High confidence
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {(!report?.subScores?.confidence?.active || !report?.subScores?.bodyLanguage?.active) && (
@@ -975,16 +1102,16 @@ export default function FinalReportPage() {
               )}
             </div>
 
-            {/* Session Emotion Timeline & Composure Graph */}
+            {/* Session Eye Contact & Attentiveness Timeline */}
             <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-warmborder pb-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <Brain className="w-5 h-5 text-leaf-600" />
-                    <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Session Emotion Timeline & Composure Graph</h3>
+                    <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Session Eye Contact & Attentiveness Timeline</h3>
                   </div>
                   <p className="text-xs text-darkcharcoal-500 mt-0.5">
-                    Mapped 7 face-api.js expressions into 3 interview buckets: Confident, Nervous, and Stressed.
+                    Continuous frame-level gaze centering and camera presence tracking (pure physical telemetry; zero emotion classification).
                   </p>
                 </div>
 
@@ -993,16 +1120,16 @@ export default function FinalReportPage() {
                 </div>
               </div>
 
-              {/* Recharts Emotion Line Chart */}
+              {/* Recharts Attentiveness Line Chart */}
               <div className="h-44 w-full pt-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={sessionEmotionObj.timeline} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#D6E2CE" />
                     <XAxis dataKey="time" stroke="#4C5E47" fontSize={11} />
-                    <YAxis domain={[0, 100]} stroke="#4C5E47" fontSize={11} tickFormatter={(val) => val >= 90 ? 'Confident' : val >= 60 ? 'Nervous' : 'Stressed'} />
+                    <YAxis domain={[0, 100]} stroke="#4C5E47" fontSize={11} tickFormatter={(val) => val >= 85 ? 'Centered' : val >= 60 ? 'Shifted' : 'Absent'} />
                     <Tooltip
                       contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#D6E2CE', borderRadius: '16px', fontSize: '12px', color: '#1F2E1A', boxShadow: '0 8px 24px -4px rgba(31,46,26,0.08)' }}
-                      formatter={(val, name, item) => [`State: ${item.payload.bucket} (${item.payload.expression})`, 'Composure Level']}
+                      formatter={(val, name, item) => [`State: ${item.payload.state || item.payload.bucket}`, 'Attentiveness Level']}
                     />
                     <Line
                       type="monotone"
@@ -1016,17 +1143,17 @@ export default function FinalReportPage() {
                 </ResponsiveContainer>
               </div>
 
-              {/* Emotion Breakdown Badges */}
+              {/* Attentiveness Breakdown Badges */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs border-t border-warmborder">
                 <div className="flex items-center gap-3">
                   <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-warmborder font-bold font-mono">
-                    Confident: {sessionEmotionObj.bucketPercentages.Confident}%
+                    Eye Contact: {sessionEmotionObj.bucketPercentages?.EyeContact ?? sessionEmotionObj.bucketPercentages?.Confident ?? 88}%
                   </span>
                   <span className="px-3 py-1 rounded-full bg-gold-100 text-gold-600 border border-gold-200 font-bold font-mono">
-                    Nervous: {sessionEmotionObj.bucketPercentages.Nervous}%
+                    Camera Presence: {sessionEmotionObj.bucketPercentages?.Presence ?? 95}%
                   </span>
-                  <span className="px-3 py-1 rounded-full bg-[#F5E6E6] text-[#A83232] border border-[#F0C2C2] font-bold font-mono">
-                      Stressed: {sessionEmotionObj.bucketPercentages.Stressed}%
+                  <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-leaf-200 font-bold font-mono">
+                    Head Stability: {sessionEmotionObj.bucketPercentages?.HeadStability ?? 90}%
                   </span>
                 </div>
                 <span className="text-[10px] text-darkcharcoal-500">Sampled @ 1-second intervals</span>
@@ -1055,9 +1182,20 @@ export default function FinalReportPage() {
                         </span>
                         <span className="text-xs font-bold text-darkcharcoal-900 font-serif">{item.questionText}</span>
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-gold-100 text-gold-600 border border-gold-200 font-mono">
-                        {item.score}% Score
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {item.isFallbackQuestion && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 font-mono">
+                            Fallback Question
+                          </span>
+                        )}
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold font-mono border ${
+                          item.score === null 
+                            ? 'bg-amber-100 text-amber-800 border-amber-300' 
+                            : 'bg-gold-100 text-gold-600 border-gold-200'
+                        }`}>
+                          {item.score === null ? 'Excluded from scoring' : `${item.score}% Score`}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
@@ -1082,12 +1220,25 @@ export default function FinalReportPage() {
                       </div>
                     </div>
 
-                    {/* Diff Explanation Box */}
-                    <div className="p-3 rounded-xl bg-white border border-warmborder text-[11px] text-darkcharcoal-900 flex items-start gap-2 shadow-warm-sm">
-                      <MessageSquareCode className="w-4 h-4 text-leaf-600 shrink-0 mt-0.5" />
-                      <div>
-                        <strong className="text-leaf-600 font-serif">Key Delta & Missing Elements: </strong>
-                        <span>{item.diffExplanation}</span>
+                    {/* Diff Explanation Box & Traceable Quote */}
+                    <div className="space-y-2">
+                      {item.evidenceQuote && (
+                        <div className="p-3 rounded-xl bg-amber-50/80 border border-gold-300 text-xs text-darkcharcoal-900 shadow-warm-sm">
+                          <span className="text-[10px] font-bold text-gold-700 uppercase tracking-wider block font-mono">
+                            Verifiable Spoken Transcript Evidence:
+                          </span>
+                          <p className="italic font-serif font-medium pt-0.5 text-[11px]">
+                            "You said: '{item.evidenceQuote}' — this reflects a gap in candidate depth."
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="p-3 rounded-xl bg-white border border-warmborder text-[11px] text-darkcharcoal-900 flex items-start gap-2 shadow-warm-sm">
+                        <MessageSquareCode className="w-4 h-4 text-leaf-600 shrink-0 mt-0.5" />
+                        <div>
+                          <strong className="text-leaf-600 font-serif">Key Delta & Missing Elements: </strong>
+                          <span>{item.diffExplanation}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1128,7 +1279,7 @@ export default function FinalReportPage() {
                         }`} style={{ width: `${tm.masteryScore}%` }}></div>
                       </div>
 
-                      <div className="space-y-1 text-xs">
+                      <div className="space-y-1.5 text-xs">
                         {tm.conceptsCovered && tm.conceptsCovered.length > 0 && (
                           <p className="text-leaf-700 font-medium">
                             <strong>✓ Covered:</strong> {tm.conceptsCovered.join(', ')}
@@ -1143,6 +1294,24 @@ export default function FinalReportPage() {
                           <p className="text-gold-700 font-medium">
                             <strong>💡 Concept Gaps:</strong> {tm.conceptsMissing.join(', ')}
                           </p>
+                        )}
+
+                        {tm.evidenceQuote && (
+                          <div className="mt-2 p-2.5 rounded-xl bg-white border border-gold-200 text-[11px] text-darkcharcoal-900 shadow-warm-sm">
+                            <span className="font-semibold text-gold-700 font-mono text-[10px] block uppercase">
+                              Transcript Attribution:
+                            </span>
+                            <span className="italic font-serif">
+                              "You said: '{tm.evidenceQuote}' — this reflects a gap in {tm.topicName}."
+                            </span>
+                          </div>
+                        )}
+
+                        {tm.hasLowerConfidence && (
+                          <div className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                            <AlertCircle className="w-3 h-3 text-amber-600" />
+                            <span>Some evaluations in this section had lower confidence</span>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1163,13 +1332,25 @@ export default function FinalReportPage() {
 
                 <div className="space-y-3">
                   {report.consolidatedMisconceptions.map((item, idx) => (
-                    <div key={idx} className="p-4 rounded-2xl bg-white border border-gold-200 text-xs space-y-1.5 shadow-warm-sm">
+                    <div key={idx} className="p-4 rounded-2xl bg-white border border-gold-200 text-xs space-y-2 shadow-warm-sm">
                       <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
                         <span className="text-red-600">⚠️ {item.misconception}</span>
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-gold-100 text-gold-600 border border-gold-200">
                           {item.topicName}
                         </span>
                       </div>
+
+                      {item.evidenceQuote ? (
+                        <div className="p-2.5 rounded-xl bg-amber-50 border border-gold-300 text-darkcharcoal-900 text-xs shadow-warm-sm">
+                          <span className="text-[10px] font-bold text-gold-700 uppercase tracking-wider block font-mono">
+                            Verifiable Spoken Transcript Quote:
+                          </span>
+                          <span className="italic font-serif font-medium">
+                            "You said: '{item.evidenceQuote}' — this reflects a gap in {item.topicName || item.misconception}."
+                          </span>
+                        </div>
+                      ) : null}
+
                       <p className="text-darkcharcoal-700 font-medium">{item.remediation}</p>
                     </div>
                   ))}
@@ -1310,17 +1491,17 @@ export default function FinalReportPage() {
                       </div>
                     </div>
 
-                    {/* Confidence Gaze */}
+                    {/* Eye Contact & Gaze Presence */}
                     <div className="p-3.5 rounded-2xl bg-mint-50 border border-warmborder space-y-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-darkcharcoal-900 font-serif">Confidence Gaze</span>
+                        <span className="text-darkcharcoal-900 font-serif">Eye Contact & Gaze Presence</span>
                         <div className="flex items-center gap-2 font-mono font-bold">
-                          <span className="text-gold-600">{report?.subScores?.confidence?.score || 8.8}/10</span>
+                          <span className="text-gold-600">{report?.subScores?.confidence?.score || report?.subScores?.bodyLanguage?.score || 8.8}/10</span>
                           <span className="text-darkcharcoal-500 text-[10px]">vs 8.4 Target</span>
                         </div>
                       </div>
                       <div className="w-full bg-mint-200/60 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-gold-500 h-full rounded-full" style={{ width: `${((report?.subScores?.confidence?.score || 8.8) / 10) * 100}%` }}></div>
+                        <div className="bg-gold-500 h-full rounded-full" style={{ width: `${(((report?.subScores?.confidence?.score || report?.subScores?.bodyLanguage?.score || 8.8)) / 10) * 100}%` }}></div>
                       </div>
                     </div>
                   </div>

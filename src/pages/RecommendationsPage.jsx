@@ -24,6 +24,7 @@ import {
   Tag,
   DollarSign
 } from 'lucide-react';
+import DegradedNotice from '../components/DegradedNotice';
 
 export default function RecommendationsPage() {
   const navigate = useNavigate();
@@ -64,6 +65,8 @@ export default function RecommendationsPage() {
   const [learningPath, setLearningPath] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorNotice, setErrorNotice] = useState('');
+  const [isDegraded, setIsDegraded] = useState(false);
+  const [degradedReason, setDegradedReason] = useState('');
 
   // UI Filters
   const [activeTab, setActiveTab] = useState('All');
@@ -133,12 +136,21 @@ export default function RecommendationsPage() {
       if (data.recommendations && Array.isArray(data.recommendations)) {
         setRecommendations(data.recommendations);
         setLearningPath(data.learningPath || []);
+        if (data.degraded) {
+          setIsDegraded(true);
+          setDegradedReason(data.degradedReason || 'Showing general recommendations — personalized suggestions are temporarily unavailable');
+        } else {
+          setIsDegraded(false);
+          setDegradedReason('');
+        }
       } else {
         throw new Error('Invalid recommendations array returned');
       }
     } catch (err) {
       console.warn('Hybrid recommendations notice:', err.message);
-      setErrorNotice('Using verified catalog fallback recommendations.');
+      setIsDegraded(true);
+      setDegradedReason('Showing general recommendations — personalized suggestions are temporarily unavailable');
+      setErrorNotice('');
       
       // Verified local fallback
       const fallbackList = INITIAL_COURSE_CATALOG.filter(c => c.fieldIds?.includes(fieldId)).slice(0, 6);
@@ -189,9 +201,13 @@ export default function RecommendationsPage() {
             <BookOpen className="w-3.5 h-3.5 text-rust-500" />
             <span>Placement Roadmap • Verified Skill Catalog</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold font-serif text-warmtext-900">Personalized Learning & Career Growth Path</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold font-serif text-warmtext-900">
+            {isDegraded ? 'General Skill Recommendations' : 'Personalized Learning & Career Growth Path'}
+          </h1>
           <p className="text-xs text-warmtext-500 max-w-2xl leading-relaxed font-sans">
-            Tailored specifically for <strong className="text-rust-500">{targetField}</strong> candidates preparing for <strong className="text-warmtext-900">{companyName}</strong> based on your performance signals & resume audit.
+            {isDegraded
+              ? `General recommendations curated for ${targetField} candidates preparing for ${companyName}.`
+              : `Tailored specifically for ${targetField} candidates preparing for ${companyName} based on your performance signals & resume audit.`}
           </p>
         </div>
 
@@ -204,6 +220,16 @@ export default function RecommendationsPage() {
           <span>{loading ? 'Analyzing Signals...' : 'Refresh Recommendations'}</span>
         </button>
       </div>
+
+      {/* Degraded State Notice */}
+      {isDegraded && !loading && (
+        <div className="animate-fadeIn">
+          <DegradedNotice
+            reason={degradedReason || "Showing general recommendations — personalized suggestions are temporarily unavailable"}
+            onRetry={fetchRecommendations}
+          />
+        </div>
+      )}
 
       {/* Recommended Learning Path (1-2-3-4 Sequenced Steps) */}
       {learningPath.length > 0 && !loading && (

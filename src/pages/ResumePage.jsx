@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   RefreshCw
 } from 'lucide-react';
+import DegradedNotice from '../components/DegradedNotice';
 
 export default function ResumePage() {
   const navigate = useNavigate();
@@ -147,12 +148,15 @@ export default function ResumePage() {
     }
   };
 
-  const atsScore = analysisResults?.atsScore ?? 0;
-  const scoreColor = atsScore >= 80 ? '#7ba05b' : atsScore >= 60 ? '#8fa368' : atsScore >= 40 ? '#d4a574' : '#a8623f';
-  const gaugeData = [
-    { name: 'Score', value: atsScore, fill: scoreColor },
-    { name: 'Remaining', value: 100 - atsScore, fill: '#123326' }
-  ];
+  const isDegraded = Boolean(analysisResults?.degraded || analysisResults?.atsScore == null);
+  const atsScore = isDegraded ? null : (analysisResults?.atsScore ?? 0);
+  const scoreColor = isDegraded ? '#d4a574' : (atsScore >= 80 ? '#7ba05b' : atsScore >= 60 ? '#8fa368' : atsScore >= 40 ? '#d4a574' : '#a8623f');
+  const gaugeData = isDegraded
+    ? [{ name: 'Unavailable', value: 100, fill: '#e5dcd3' }]
+    : [
+        { name: 'Score', value: atsScore, fill: scoreColor },
+        { name: 'Remaining', value: 100 - atsScore, fill: '#123326' }
+      ];
 
   return (
     <div className="space-y-8 py-2 max-w-7xl mx-auto">
@@ -255,13 +259,19 @@ export default function ResumePage() {
                 <span className="px-3 py-1 rounded-full text-xs font-bold bg-rust-100 text-rust-700 border border-warmborder">
                   Stage 1 • Resume Screening Gate
                 </span>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                  analysisResults.atsScore >= 60 
-                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
-                    : 'bg-amber-100 text-amber-800 border-amber-200'
-                }`}>
-                  {analysisResults.atsScore >= 60 ? '✓ Gate Passed (ATS Score >= 60%)' : '⚠️ Needs Work (< 60% ATS Score)'}
-                </span>
+                {isDegraded ? (
+                  <span className="px-3 py-1 rounded-full text-xs font-bold border bg-amber-100 text-amber-800 border-amber-200">
+                    ⚠️ Screening Score Unavailable (Reviewing with general rubric)
+                  </span>
+                ) : (
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                    analysisResults.atsScore >= 60 
+                      ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                      : 'bg-amber-100 text-amber-800 border-amber-200'
+                  }`}>
+                    {analysisResults.atsScore >= 60 ? '✓ Gate Passed (ATS Score >= 60%)' : '⚠️ Needs Work (< 60% ATS Score)'}
+                  </span>
+                )}
               </div>
               <h2 className="text-xl font-bold font-serif">
                 Stage 1 Screening Analysis Complete
@@ -282,6 +292,18 @@ export default function ResumePage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Degraded Fallback Banner */}
+      {analysisResults && isDegraded && (
+        <div className="animate-fadeIn">
+          <DegradedNotice
+            reason={analysisResults.degradedReason || "We couldn't fully analyze your resume right now — these results are limited. Try again in a moment for a full personalized analysis."}
+            onRetry={() => {
+              if (file) uploadAndAnalyzeResume(file);
+            }}
+          />
         </div>
       )}
 
@@ -320,9 +342,11 @@ export default function ResumePage() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/3 text-center space-y-1">
-                  <div className="text-4xl font-bold font-serif text-warmtext-900">{atsScore}/100</div>
+                  <div className={`font-bold font-serif text-warmtext-900 ${isDegraded ? 'text-2xl sm:text-3xl' : 'text-4xl'}`}>
+                    {isDegraded ? 'Unavailable' : `${atsScore}/100`}
+                  </div>
                   <div className="text-[11px] font-bold" style={{ color: scoreColor }}>
-                    {atsScore >= 80 ? 'Tier-1 High Pass' : atsScore >= 60 ? 'Moderate Match' : atsScore >= 40 ? 'Needs Major Revision' : 'High Risk - Critical Gaps'}
+                    {isDegraded ? 'Personalized Score Unavailable' : (atsScore >= 80 ? 'Tier-1 High Pass' : atsScore >= 60 ? 'Moderate Match' : atsScore >= 40 ? 'Needs Major Revision' : 'High Risk - Critical Gaps')}
                   </div>
                 </div>
               </div>

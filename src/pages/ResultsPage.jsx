@@ -464,13 +464,13 @@ export default function ResultsPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold font-serif text-[#FFF9F4]">Webcam Facial Confidence Signals</h3>
+                    <h3 className="text-base font-bold font-serif text-[#FFF9F4]">Webcam Gaze & Attentiveness Telemetry</h3>
                     <span className="px-3 py-0.5 rounded-full font-bold font-serif text-xs bg-[#C17A5C] text-[#FFF9F4] border border-white/20">
-                      {questionScores[0]?.facialScore || 85}% Facial Score
+                      {questionScores[0]?.eyeContactRatio || 90}% Eye Contact
                     </span>
                   </div>
                   <p className="text-xs text-[#FFF9F4]/80">
-                    Formula: (Eye Contact × 40%) + (Looking Away × 20%) + (Head Stability × 20%) + (Smile Demeanor × 20%).
+                    Physical Telemetry: Eye Contact (50%) + Camera Presence (20%) + Posture (15%) + Stability (15%). Facial emotion classification is strictly excluded.
                   </p>
                 </div>
               </div>
@@ -482,38 +482,38 @@ export default function ResultsPage() {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
               <div className="bg-[#C17A5C] rounded-2xl p-4 border border-[#A85D42]/30 space-y-1 shadow-warm-xs">
-                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">1. Eye Contact (40%)</span>
-                <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.gazeRatio || 90}%</div>
+                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">1. Eye Contact (50%)</span>
+                <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.eyeContactRatio || 90}%</div>
                 <div className="text-[10px] text-[#FFF9F4]/80">Centered camera gaze</div>
               </div>
               <div className="bg-[#C17A5C] rounded-2xl p-4 border border-[#A85D42]/30 space-y-1 shadow-warm-xs">
-                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">2. Looking Away (20%)</span>
+                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">2. Camera Presence (20%)</span>
+                <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.presenceRatio || 95}%</div>
+                <div className="text-[10px] text-[#FFF9F4]/80">Candidate in frame</div>
+              </div>
+              <div className="bg-[#C17A5C] rounded-2xl p-4 border border-[#A85D42]/30 space-y-1 shadow-warm-xs">
+                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">3. Forward Facing (15%)</span>
                 <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.noLookingAwayRatio || 92}%</div>
                 <div className="text-[10px] text-[#FFF9F4]/80">No extreme angle turns</div>
               </div>
               <div className="bg-[#C17A5C] rounded-2xl p-4 border border-[#A85D42]/30 space-y-1 shadow-warm-xs">
-                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">3. Head Stability (20%)</span>
+                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">4. Head Stability (15%)</span>
                 <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.headStabilityRatio || 88}%</div>
-                <div className="text-[10px] text-[#FFF9F4]/80">Calm landmark posture</div>
-              </div>
-              <div className="bg-[#C17A5C] rounded-2xl p-4 border border-[#A85D42]/30 space-y-1 shadow-warm-xs">
-                <span className="text-[#FFF9F4]/80 text-[10px] uppercase tracking-wider font-bold">4. Smile & Demeanor (20%)</span>
-                <div className="font-bold font-serif text-xl text-[#FFF9F4]">{questionScores[0]?.smileRatio || 85}%</div>
-                <div className="text-[10px] text-[#FFF9F4]/80">Positive expression threshold</div>
+                <div className="text-[10px] text-[#FFF9F4]/80">Steady posture landmarks</div>
               </div>
             </div>
           </div>
 
-          {/* Session Emotion Timeline & Composure Graph */}
+          {/* Session Eye Contact & Attentiveness Timeline */}
           <div className="rounded-3xl bg-[#A85D42] p-6 space-y-4 border border-[#C17A5C]/40 shadow-warm-md text-[#FFF9F4]">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#C17A5C]/40 pb-4">
               <div>
                 <div className="flex items-center gap-2">
                   <Brain className="w-5 h-5 text-[#FFF9F4]" />
-                  <h3 className="text-base font-bold font-serif text-[#FFF9F4]">Session Emotion Timeline & Composure Graph</h3>
+                  <h3 className="text-base font-bold font-serif text-[#FFF9F4]">Session Eye Contact & Attentiveness Timeline</h3>
                 </div>
                 <p className="text-xs text-[#FFF9F4]/80 mt-0.5">
-                  Mapped 7 face-api.js expressions into 3 interview buckets: Confident, Nervous, and Stressed.
+                  Continuous frame-level gaze centering and camera presence tracking (pure physical telemetry; zero emotion classification).
                 </p>
               </div>
 
@@ -522,16 +522,16 @@ export default function ResultsPage() {
               </div>
             </div>
 
-            {/* Recharts Emotion Line Chart */}
+            {/* Recharts Eye Contact & Attentiveness Line Chart */}
             <div className="h-44 w-full pt-1">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={sessionEmotionObj.timeline} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#C17A5C" />
                   <XAxis dataKey="time" stroke="#FFF9F4" fontSize={11} />
-                  <YAxis domain={[0, 100]} stroke="#FFF9F4" fontSize={11} tickFormatter={(val) => val >= 90 ? 'Confident' : val >= 60 ? 'Nervous' : 'Stressed'} />
+                  <YAxis domain={[0, 100]} stroke="#FFF9F4" fontSize={11} tickFormatter={(val) => val >= 85 ? 'Centered' : val >= 60 ? 'Shifted' : 'Absent'} />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#84412B', borderColor: '#C17A5C', borderRadius: '12px', fontSize: '12px', color: '#FFF9F4' }}
-                    formatter={(val, name, item) => [`State: ${item.payload.bucket} (${item.payload.expression})`, 'Composure Level']}
+                    formatter={(val, name, item) => [`State: ${item.payload.state || item.payload.bucket}`, 'Attentiveness']}
                   />
                   <Line
                     type="monotone"
@@ -545,17 +545,17 @@ export default function ResultsPage() {
               </ResponsiveContainer>
             </div>
 
-            {/* Emotion Breakdown Badges */}
+            {/* Attentiveness Breakdown Badges */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs border-t border-[#C17A5C]/40">
               <div className="flex items-center gap-3">
                 <span className="px-3 py-1 rounded-full bg-[#C17A5C] text-[#FFF9F4] border border-white/20 font-bold font-mono">
-                  Confident: {sessionEmotionObj.bucketPercentages.Confident}%
+                  Eye Contact: {sessionEmotionObj.bucketPercentages?.EyeContact ?? sessionEmotionObj.bucketPercentages?.Confident ?? 88}%
                 </span>
                 <span className="px-3 py-1 rounded-full bg-[#C17A5C] text-[#FFF9F4] border border-white/20 font-bold font-mono">
-                  Nervous: {sessionEmotionObj.bucketPercentages.Nervous}%
+                  Camera Presence: {sessionEmotionObj.bucketPercentages?.Presence ?? 95}%
                 </span>
                 <span className="px-3 py-1 rounded-full bg-[#C17A5C] text-[#FFF9F4] border border-white/20 font-bold font-mono">
-                  Stressed: {sessionEmotionObj.bucketPercentages.Stressed}%
+                  Head Stability: {sessionEmotionObj.bucketPercentages?.HeadStability ?? 90}%
                 </span>
               </div>
               <span className="text-[10px] text-[#FFF9F4]/80">Sampled @ 1-second intervals</span>
@@ -577,7 +577,7 @@ export default function ResultsPage() {
                 <thead className="bg-[#C17A5C] text-[#FFF9F4] uppercase font-mono text-[10px] border-b border-[#A85D42]/40">
                   <tr>
                     <th className="p-3 font-bold text-[#FFF9F4]">Question</th>
-                    <th className="p-3 font-bold text-[#FFF9F4]">Confidence Score</th>
+                    <th className="p-3 font-bold text-[#FFF9F4]">Communication Composure</th>
                     <th className="p-3 font-bold text-[#FFF9F4]">Speaking Pace</th>
                     <th className="p-3 font-bold text-[#FFF9F4]">Fillers</th>
                     <th className="p-3 font-bold text-[#FFF9F4]">Long Pauses</th>
@@ -587,7 +587,7 @@ export default function ResultsPage() {
                   {questionScores.map((q, idx) => (
                     <tr key={idx} className="hover:bg-[#C17A5C]/30 transition-colors">
                       <td className="p-3 font-semibold text-[#FFF9F4]">{q.name}: {q.questionText}</td>
-                      <td className="p-3 font-mono font-bold text-[#FFF9F4]">{q.score}%</td>
+                      <td className="p-3 font-mono font-bold text-[#FFF9F4]">{q.composureScore ?? q.score}%</td>
                       <td className="p-3 font-mono text-[#FFF9F4]/90">{q.wpm} WPM</td>
                       <td className="p-3 font-mono text-[#FFF9F4]/90">{q.fillers}</td>
                       <td className="p-3 font-mono text-[#FFF9F4]/90">{q.pauses}</td>

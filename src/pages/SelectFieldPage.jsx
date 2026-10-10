@@ -18,7 +18,9 @@ import {
   Sparkles,
   ArrowRight,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  Star,
+  Info
 } from 'lucide-react';
 
 const ICON_MAP = {
@@ -82,6 +84,10 @@ export default function SelectFieldPage() {
           <p className="text-xs sm:text-sm text-warmtext-500 max-w-2xl">
             Choose your core domain. PlacePrep will dynamically customize your technical rounds, interview question style, and course recommendations specifically for this field.
           </p>
+          <div className="flex items-center gap-1.5 text-[11px] text-warmtext-500 pt-1 italic font-sans">
+            <Info className="w-3.5 h-3.5 text-rust-500 shrink-0" />
+            <span>Based on publicly available interview experience reports.</span>
+          </div>
         </div>
 
         <div className="flex flex-col items-end gap-2 text-xs font-mono shrink-0">
@@ -102,6 +108,29 @@ export default function SelectFieldPage() {
         </div>
       </div>
 
+      {/* Recommended Demo Path Banner */}
+      <div className="rounded-2xl p-4 sm:p-5 bg-[#FDF4EC] border-2 border-rust-300 shadow-warm-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-rust-500 text-white flex items-center justify-center shrink-0 shadow-warm-xs">
+            <Star className="w-5 h-5 fill-current" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs sm:text-sm font-bold font-serif text-warmtext-900">Recommended Demo Paths</h3>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rust-100 text-rust-700 border border-rust-300 font-mono">
+                Most polished experience
+              </span>
+            </div>
+            <p className="text-[11px] text-warmtext-600 mt-0.5">
+              For live judging: select <strong>Software Development (SDE)</strong> (paired with Google) or <strong>QA / Software Testing</strong> (paired with Amazon) for our most complete rubrics, live coding, and rubric-anchored evaluations.
+            </p>
+          </div>
+        </div>
+        <span className="text-[11px] text-warmtext-500 font-mono shrink-0 italic">
+          All 10 fields & 20 recruiters selectable
+        </span>
+      </div>
+
       {/* Grid of 10 Field Cards */}
       {loading ? (
         <div className="p-12 text-center text-warmtext-500 font-serif">Loading Career Tracks...</div>
@@ -110,6 +139,7 @@ export default function SelectFieldPage() {
           {fields.map((fieldItem) => {
             const IconComponent = ICON_MAP[fieldItem.icon] || Code2;
             const isSelected = selectedField?.fieldId === fieldItem.fieldId;
+            const isRecommendedDemo = ['sde', 'qa-testing'].includes(fieldItem.fieldId);
 
             return (
               <div
@@ -118,11 +148,21 @@ export default function SelectFieldPage() {
                 className={`card-interactive rounded-2xl p-6 border flex flex-col justify-between space-y-4 relative group ${
                   isSelected
                     ? 'bg-[#FDF4EC] border-rust-500 border-l-4 border-l-rust-500 shadow-glow-rust'
+                    : isRecommendedDemo
+                    ? 'bg-[#FDF4EC] border-rust-300 border-l-4 border-l-rust-500 shadow-warm-sm ring-1 ring-rust-200'
                     : 'bg-[#FDF4EC] border-warmborder border-l-4 border-l-dustyrose-500 shadow-warm-sm'
                 }`}
               >
                 <div className="space-y-3">
                   
+                  {/* Recommended Demo Badge */}
+                  {isRecommendedDemo && (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rust-500 text-white text-[10px] font-extrabold shadow-warm-xs uppercase tracking-wide">
+                      <Star className="w-3 h-3 fill-current" />
+                      <span>Recommended Demo Path • Most polished experience</span>
+                    </div>
+                  )}
+
                   {/* Top Bar: Icon & Badges */}
                   <div className="flex items-center justify-between">
                     <div className={`icon-badge w-12 h-12 rounded-xl border ${
