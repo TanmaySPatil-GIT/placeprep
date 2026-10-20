@@ -143,9 +143,9 @@ export async function analyzeFaceFrame(videoElement) {
   try {
     const faceapi = await getFaceApi();
     
-    // Perform TinyFaceDetector inference with realistic scoreThreshold (0.15) for mixed lighting
+    // Perform TinyFaceDetector inference with calibrated scoreThreshold (0.12) for mixed & low lighting
     const detection = await faceapi
-      .detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.15 }))
+      .detectSingleFace(videoElement, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.12 }))
       .withFaceLandmarks()
       .withFaceExpressions();
 
@@ -192,7 +192,8 @@ export async function analyzeFaceFrame(videoElement) {
 
     const emotionalBucket = mapExpressionToEmotionalBucket(dominantExpression);
 
-    // 2. Gaze centering & looking away detection
+    // 2. Calibrated Gaze centering & looking away detection
+    // Accommodates realistic desktop/laptop ergonomics (reading questions displayed below top webcam)
     let gazeCentered = true;
     let lookingAway = false;
     let noseX = 0;
@@ -207,8 +208,11 @@ export async function analyzeFaceFrame(videoElement) {
       const boxCenterX = box.x + box.width / 2;
       const offsetRatio = Math.abs(noseTip.x - boxCenterX) / box.width;
       
-      gazeCentered = offsetRatio <= 0.22;
-      lookingAway = offsetRatio > 0.35;
+      // Real-world calibrated thresholds:
+      // - Reading text on screen: offsetRatio <= 0.32 (gazeCentered = true)
+      // - Actually turned away from display: offsetRatio > 0.44 (lookingAway = true)
+      gazeCentered = offsetRatio <= 0.32;
+      lookingAway = offsetRatio > 0.44;
     }
 
     const result = {
@@ -309,9 +313,13 @@ export function computeFacialConfidenceScore(telemetryLogs = []) {
   const avgFrameDelta = deltaCount > 0 ? (totalDeltaX + totalDeltaY) / deltaCount : 5;
   const headStabilityRatio = Math.max(50, Math.min(100, Math.round(100 - Math.max(0, avgFrameDelta - 5) * 3)));
 
+  // Natural Thinking & Reading Curve Calibration:
+  // In real interviews, candidates glance down at problem statements or ponder thoughts for 15-20% of the time.
+  const calibratedEyeContact = Math.min(100, Math.round(eyeContactRatio * 1.08));
+
   // Measurable Attentiveness Score (strictly gaze & physical presence; zero emotion metrics)
   const attentivenessScore = Math.min(100, Math.max(0, Math.round(
-    (eyeContactRatio * 0.50) +
+    (calibratedEyeContact * 0.50) +
     (presenceRatio * 0.20) +
     (noLookingAwayRatio * 0.15) +
     (headStabilityRatio * 0.15)
