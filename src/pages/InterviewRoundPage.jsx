@@ -418,8 +418,10 @@ export default function InterviewRoundPage() {
     return () => clearInterval(interval);
   }, [cameraPermission, modelsReady, hasStartedSession, videoActive]);
 
-  // 5. Initialize Web Speech Recognition
+  // 5. Initialize Web Speech Recognition with Auto-Reconnect and Interim Filler Buffer
   const accumulatedFinalRef = useRef('');
+  const isAnsweringRef = useRef(false);
+  const detectedFillersRef = useRef({});
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -453,6 +455,22 @@ export default function InterviewRoundPage() {
           setLastSegmentConfidence(confSum / confCount);
         }
 
+        // Real-time interim disfluency detector (catches fillers before browser STT scrubs them)
+        const combinedSlice = (interimText + ' ' + (event.results[event.results.length - 1]?.[0]?.transcript || '')).toLowerCase();
+        const hesitationRegex = /\b(u+m+|u+h+|e+r+m*|a+h+|h+m+)\b/gi;
+        const hesitationMatches = combinedSlice.match(hesitationRegex);
+        if (hesitationMatches) {
+          detectedFillersRef.current['um/uh'] = Math.max(detectedFillersRef.current['um/uh'] || 0, hesitationMatches.length);
+        }
+        const crutches = ['like', 'basically', 'actually', 'literally', 'you know', 'kind of', 'sort of', 'i mean', 'so yeah'];
+        crutches.forEach(c => {
+          const reg = new RegExp(`\\b${c}\\b`, 'gi');
+          const m = combinedSlice.match(reg);
+          if (m) {
+            detectedFillersRef.current[c] = Math.max(detectedFillersRef.current[c] || 0, m.length);
+          }
+        });
+
         const combined = (accumulatedFinalRef.current + ' ' + interimText).replace(/\s+/g, ' ').trim();
         if (combined) {
           transcriptRef.current = combined;
@@ -463,6 +481,18 @@ export default function InterviewRoundPage() {
 
       recognition.onerror = (event) => {
         console.warn('Speech recognition notice:', event.error);
+      };
+
+      // Seamless Auto-Reconnect: prevent Chrome from terminating mic if candidate pauses to think
+      recognition.onend = () => {
+        if (isAnsweringRef.current) {
+          try {
+            recognition.start();
+            console.log('[InterviewRoundPage:Tech] Auto-reconnected SpeechRecognition after pause.');
+          } catch (e) {
+            // Already active or restarting
+          }
+        }
       };
 
       recognitionRef.current = recognition;
@@ -598,9 +628,11 @@ export default function InterviewRoundPage() {
     stopSpeech();
     accumulatedFinalRef.current = '';
     transcriptRef.current = '';
+    detectedFillersRef.current = {};
     setLiveTranscript('');
     setSavedAnswerMetrics(null);
     setIsAnswering(true);
+    isAnsweringRef.current = true;
     setAiState('listening');
 
     if (recognitionRef.current) {
@@ -616,6 +648,7 @@ export default function InterviewRoundPage() {
   const handleStopAnswer = async (explicitText = null) => {
     console.log('[InterviewRoundPage:Tech] [setState START] setIsAnswering(false), setAiState("thinking"), setEvaluatingFollowup(true)');
     setIsAnswering(false);
+    isAnsweringRef.current = false;
     setAiState('thinking');
     setEvaluatingFollowup(true);
     console.log('[InterviewRoundPage:Tech] [setState COMPLETE] isAnswering=false, aiState=thinking, evaluatingFollowup=true');
@@ -638,9 +671,10 @@ export default function InterviewRoundPage() {
       }
 
       const userTranscript = capturedText || "I don't know the answer to this question right now.";
+      const capturedFillers = { ...detectedFillersRef.current };
 
-      // 1. Analyze speech metrics & vision telemetry
-      const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
+      // 1. Analyze speech metrics & vision telemetry with real-time captured filler disfluencies
+      const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence, capturedFillers);
       const recentLogs = telemetryLogs.slice(-20);
       const gazeRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.gazeCentered).length / recentLogs.length) * 100) : 92;
       const faceRatio = recentLogs.length > 0 ? Math.round((recentLogs.filter(l => l.faceDetected).length / recentLogs.length) * 100) : 95;

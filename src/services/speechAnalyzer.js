@@ -16,25 +16,35 @@ export const FILLER_WORDS = [
 /**
  * Analyze transcript text and return granular speech metrics per answer
  */
-export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, longPauseCount = 0, segmentConfidence = 0.92) {
+export function analyzeSpeechMetrics(
+  transcriptText = '', 
+  durationSeconds = 1, 
+  longPauseCount = 0, 
+  segmentConfidence = 0.92,
+  detectedFillers = {}
+) {
   const text = (transcriptText || '').trim();
   const safeDuration = Math.max(1, durationSeconds);
   const safeConfidence = typeof segmentConfidence === 'number' && segmentConfidence > 0 ? segmentConfidence : 0.92;
   const clarityProxyPercentage = Math.round(safeConfidence * 100);
+
+  // Initialize filler breakdown with any real-time captured interim fillers
+  const fillerBreakdown = { ...(detectedFillers || {}) };
+  let totalFillers = Object.values(fillerBreakdown).reduce((sum, val) => sum + (Number(val) || 0), 0);
 
   if (!text) {
     return {
       wordCount: 0,
       durationSeconds: safeDuration,
       wordsPerMinute: 0,
-      fillerWordCount: 0,
-      fillerBreakdown: {},
+      fillerWordCount: totalFillers,
+      fillerBreakdown,
       longPauseCount,
       repeatCount: 0,
       repeatPhrases: [],
       cadenceGrade: 'Too Slow',
       clarityProxyPercentage: 85,
-      score: 60
+      score: Math.max(40, 60 - totalFillers * 4 - longPauseCount * 5)
     };
   }
 
@@ -43,16 +53,14 @@ export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, l
   const wordCount = words.length;
   const wordsPerMinute = Math.round((wordCount / safeDuration) * 60);
 
-  // 2. Comprehensive Filler Word Matches (with regex support for elongated disfluencies like "ummm", "uhhh")
-  const fillerBreakdown = {};
-  let totalFillers = 0;
-
+  // 2. Comprehensive Filler Word Matches from final text (merge with interim buffer taking max)
   // Track elongated hesitation phonemes (um, umm, uh, uhh, er, erm, hmm)
   const hesitationRegex = /\b(u+m+|u+h+|e+r+m*|a+h+|h+m+)\b/gi;
   const hesitationMatches = text.match(hesitationRegex);
-  if (hesitationMatches && hesitationMatches.length > 0) {
-    fillerBreakdown['um/uh'] = hesitationMatches.length;
-    totalFillers += hesitationMatches.length;
+  const textHesitationCount = hesitationMatches ? hesitationMatches.length : 0;
+  const existingUmCount = fillerBreakdown['um/uh'] || 0;
+  if (textHesitationCount > existingUmCount) {
+    fillerBreakdown['um/uh'] = textHesitationCount;
   }
 
   // Check multi-word and distinct verbal crutches
@@ -60,7 +68,7 @@ export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, l
     'like', 'basically', 'actually', 'literally', 'honestly', 'essentially',
     'you know', 'you know what i mean', 'you see',
     'kind of', 'sort of', 'i mean', 'i guess',
-    'so yeah', 'and all', 'or something', 'okay so'
+    'so yeah', 'and all', 'or something', 'right', 'okay so'
   ];
 
   verbalCrutches.forEach((filler) => {
@@ -68,11 +76,14 @@ export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, l
     const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
     const matches = text.match(regex);
     const count = matches ? matches.length : 0;
-    if (count > 0) {
+    const existing = fillerBreakdown[filler] || 0;
+    if (count > existing) {
       fillerBreakdown[filler] = count;
-      totalFillers += count;
     }
   });
+
+  // Re-sum total fillers after merging
+  totalFillers = Object.values(fillerBreakdown).reduce((sum, val) => sum + (Number(val) || 0), 0);
 
   // 3. Repeated 2-word phrase detection
   const repeatPhrases = [];

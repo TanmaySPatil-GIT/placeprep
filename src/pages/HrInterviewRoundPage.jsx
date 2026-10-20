@@ -295,8 +295,10 @@ export default function HrInterviewRoundPage() {
     return () => clearInterval(interval);
   }, [cameraPermission, modelsReady, hasStartedSession, videoActive]);
 
-  // Speech Recognition Init
+  // Speech Recognition Init with Auto-Reconnect and Interim Filler Buffer
   const accumulatedFinalRef = useRef('');
+  const isAnsweringRef = useRef(false);
+  const detectedFillersRef = useRef({});
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -330,6 +332,22 @@ export default function HrInterviewRoundPage() {
           setLastSegmentConfidence(confSum / confCount);
         }
 
+        // Real-time interim disfluency detector (catches fillers before browser STT scrubs them)
+        const combinedSlice = (interimText + ' ' + (event.results[event.results.length - 1]?.[0]?.transcript || '')).toLowerCase();
+        const hesitationRegex = /\b(u+m+|u+h+|e+r+m*|a+h+|h+m+)\b/gi;
+        const hesitationMatches = combinedSlice.match(hesitationRegex);
+        if (hesitationMatches) {
+          detectedFillersRef.current['um/uh'] = Math.max(detectedFillersRef.current['um/uh'] || 0, hesitationMatches.length);
+        }
+        const crutches = ['like', 'basically', 'actually', 'literally', 'you know', 'kind of', 'sort of', 'i mean', 'so yeah'];
+        crutches.forEach(c => {
+          const reg = new RegExp(`\\b${c}\\b`, 'gi');
+          const m = combinedSlice.match(reg);
+          if (m) {
+            detectedFillersRef.current[c] = Math.max(detectedFillersRef.current[c] || 0, m.length);
+          }
+        });
+
         const clean = (accumulatedFinalRef.current + ' ' + interimText).replace(/\s+/g, ' ').trim();
         if (clean) {
           transcriptRef.current = clean;
@@ -340,6 +358,18 @@ export default function HrInterviewRoundPage() {
 
       recognition.onerror = (e) => {
         console.warn('Speech recognition error:', e.error);
+      };
+
+      // Seamless Auto-Reconnect: prevent Chrome from terminating mic if candidate pauses to think
+      recognition.onend = () => {
+        if (isAnsweringRef.current) {
+          try {
+            recognition.start();
+            console.log('[HrInterviewRoundPage] Auto-reconnected SpeechRecognition after pause.');
+          } catch (e) {
+            // Already active or restarting
+          }
+        }
       };
 
       recognitionRef.current = recognition;
@@ -485,7 +515,9 @@ export default function HrInterviewRoundPage() {
     stopSpeech();
     accumulatedFinalRef.current = '';
     transcriptRef.current = '';
+    detectedFillersRef.current = {};
     setIsAnswering(true);
+    isAnsweringRef.current = true;
     setLiveTranscript('');
     setAnswerDuration(0);
     setLongPauseCount(0);
@@ -500,6 +532,7 @@ export default function HrInterviewRoundPage() {
   const handleStopAnswer = async () => {
     console.log('[HrInterviewRoundPage] [setState START] setIsAnswering(false), setAiState("thinking"), setEvaluatingFollowup(true)');
     setIsAnswering(false);
+    isAnsweringRef.current = false;
     setAiState('thinking');
     setEvaluatingFollowup(true);
     console.log('[HrInterviewRoundPage] [setState COMPLETE] isAnswering=false, aiState=thinking, evaluatingFollowup=true');
@@ -522,6 +555,7 @@ export default function HrInterviewRoundPage() {
       }
 
       const userTranscript = capturedText || "I don't have a response to this question right now.";
+      const capturedFillers = { ...detectedFillersRef.current };
       
       const updatedHistory = [
         ...conversationHistory,
@@ -531,7 +565,7 @@ export default function HrInterviewRoundPage() {
       setConversationHistory(updatedHistory);
       console.log('[HrInterviewRoundPage] [setState COMPLETE] setConversationHistory updated with candidate turn');
 
-      const speechMetrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);
+      const speechMetrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence, capturedFillers);
       console.log('[Interview Debug: HR] Granular speech metrics calculated:', speechMetrics);
 
       const metrics = calculateConfidenceScore({
