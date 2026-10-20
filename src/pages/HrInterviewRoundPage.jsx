@@ -411,12 +411,12 @@ export default function HrInterviewRoundPage() {
 
   const triggerAISpeech = (text) => {
     if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
-    setAiState('speaking');
-    
-    // Safety fallback: Ensure aiState resets to 'idle' after 12s even if TTS onend event fails
+    const wordCount = (text || '').split(/\s+/).filter(Boolean).length;
+    const safetyDurationMs = Math.max(12000, Math.round((wordCount / 2.2) * 1000) + 6000);
+
     ttsTimerRef.current = setTimeout(() => {
       setAiState('idle');
-    }, 12000);
+    }, safetyDurationMs);
 
     speakText({
       text,

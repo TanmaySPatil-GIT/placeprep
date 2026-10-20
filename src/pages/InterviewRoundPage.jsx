@@ -198,11 +198,12 @@ export default function InterviewRoundPage() {
     if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
     const currentPersona = personaOverride || getActivePersona(totalExchanges);
 
-    setAiState('speaking');
+    const wordCount = (textToSpeak || '').split(/\s+/).filter(Boolean).length;
+    const safetyDurationMs = Math.max(12000, Math.round((wordCount / 2.2) * 1000) + 6000);
 
     ttsTimerRef.current = setTimeout(() => {
       setAiState('idle');
-    }, 12000);
+    }, safetyDurationMs);
 
     speakText({
       text: textToSpeak,

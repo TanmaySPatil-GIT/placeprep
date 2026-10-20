@@ -75,14 +75,66 @@ export function getAvailableVoices(langCode = 'en-US') {
 export const getAvailableEnglishVoices = getAvailableVoices;
 
 /**
+ * Conversational Text Pre-processor
+ * Strips raw markdown, expands tech abbreviations (e.g. O(N), SQL, API),
+ * and structures punctuation spacing for warm, human-like speech delivery.
+ */
+export function cleanForConversationalSpeech(text = '') {
+  if (!text) return '';
+
+  return text
+    // Strip markdown code fences, backticks, bold/italics
+    .replace(/```[\s\S]*?```/g, ' [code omitted for brevity] ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_{1,2}([^_]+)_{1,2}/g, '$1')
+    // Remove markdown list numbers/bullets at start of lines
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    // Common developer terms phonetic translation
+    .replace(/\bO\(1\)\b/gi, 'O of 1')
+    .replace(/\bO\(n\^2\)\b/gi, 'O of N squared')
+    .replace(/\bO\(n log n\)\b/gi, 'O of N log N')
+    .replace(/\bO\(log n\)\b/gi, 'O of log N')
+    .replace(/\bO\(n\)\b/gi, 'O of N')
+    .replace(/\bSQL\b/g, 'Sequel')
+    .replace(/\bNoSQL\b/g, 'No Sequel')
+    .replace(/\bAPI\b/g, 'A P I')
+    .replace(/\bAPIs\b/g, 'A P Is')
+    .replace(/\bCI\/CD\b/gi, 'C I C D')
+    .replace(/\be\.g\.,?\b/gi, 'for example,')
+    .replace(/\bi\.e\.,?\b/gi, 'that is,')
+    .replace(/\bvs\.?\b/gi, 'versus')
+    .replace(/\bw\/\b/gi, 'with')
+    .replace(/\b&\b/g, ' and ')
+    // Normalize excess whitespace and line breaks
+    .replace(/(\r\n|\n|\r)/gm, ' ')
+    // Micro-pauses: ensure clean spacing after punctuation
+    .replace(/([.?!])\s*/g, '$1 ')
+    .replace(/([,;:])\s*/g, '$1 ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+let activeSpeechKeepAlive = null;
+
+function clearKeepAlive() {
+  if (activeSpeechKeepAlive) {
+    clearInterval(activeSpeechKeepAlive);
+    activeSpeechKeepAlive = null;
+  }
+}
+
+/**
  * Natural voice speaking function with human conversational cadence.
  */
 export function speakText({ 
   text, 
   voice, 
   langCode = 'en-US', 
-  rate = 0.96, // Friendly, natural conversational pacing (never rushed or robotic)
-  pitch = 1.02, // Warm, pleasant conversational pitch
+  rate = 0.98, // Friendly, natural conversational pacing (never rushed or robotic)
+  pitch = 1.03, // Warm, pleasant conversational pitch
   onStart, 
   onEnd, 
   onError 
@@ -92,15 +144,15 @@ export function speakText({
     return;
   }
 
-  // Cancel any ongoing speech before starting a new utterance
+  // Cancel any ongoing speech & clear previous heartbeat
+  clearKeepAlive();
   window.speechSynthesis.cancel();
 
-  // Clean formatting tokens like markdown quotes or bullet prefixes so speech sounds like a person talking
-  const spokenText = text
-    .replace(/\*\*/g, '')
-    .replace(/^["']|["']$/g, '')
-    .replace(/(\r\n|\n|\r)/gm, ' ')
-    .trim();
+  const spokenText = cleanForConversationalSpeech(text);
+  if (!spokenText) {
+    if (onEnd) onEnd();
+    return;
+  }
 
   const utterance = new SpeechSynthesisUtterance(spokenText);
   utterance.rate = rate;
@@ -117,23 +169,47 @@ export function speakText({
     }
   }
 
-  if (onStart) utterance.onstart = onStart;
-  if (onEnd) utterance.onend = onEnd;
-  if (onError) utterance.onerror = (e) => {
+  const handleFinish = () => {
+    clearKeepAlive();
+    if (onEnd) onEnd();
+  };
+
+  const handleSpeechError = (e) => {
+    clearKeepAlive();
     console.warn('SpeechSynthesis notice:', e);
     if (onError) onError(e);
     if (onEnd) onEnd();
   };
 
+  utterance.onstart = () => {
+    // Chromium speech synthesis keep-alive: prevents audio from freezing on utterances > 15s
+    clearKeepAlive();
+    activeSpeechKeepAlive = setInterval(() => {
+      if (!window.speechSynthesis.speaking) {
+        clearKeepAlive();
+      } else {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      }
+    }, 9000);
+
+    if (onStart) onStart();
+  };
+
+  utterance.onend = handleFinish;
+  utterance.onerror = handleSpeechError;
+
   try {
     window.speechSynthesis.speak(utterance);
   } catch (err) {
+    clearKeepAlive();
     console.error('Failed to execute speechSynthesis.speak:', err);
     if (onEnd) onEnd();
   }
 }
 
 export function stopSpeech() {
+  clearKeepAlive();
   if (isTTSSupported()) {
     window.speechSynthesis.cancel();
   }
