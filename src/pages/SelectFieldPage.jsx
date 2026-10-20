@@ -65,8 +65,12 @@ export default function SelectFieldPage() {
     fetchFields();
   }, []);
 
-  const handleFieldSelect = async (fieldItem) => {
-    await selectField(fieldItem);
+  const handleFieldSelect = (fieldItem, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    selectField(fieldItem);
     navigate('/companies');
   };
 
@@ -97,6 +101,14 @@ export default function SelectFieldPage() {
               {selectedField?.name || 'SDE'}
             </strong>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate('/companies')}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-rust-500 hover:bg-rust-600 text-white font-extrabold text-xs shadow-glow-rust transition-all cursor-pointer hover:scale-[1.02]"
+          >
+            <span>Proceed to Companies</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
           <div className="flex items-center gap-1.5 text-[10px]">
             <span className="px-2 py-0.5 rounded-full bg-dustyrose-100 text-dustyrose-700 border border-dustyrose-200 font-bold">
               {difficultyLevel || 'Medium'} Difficulty
@@ -211,15 +223,47 @@ export default function SelectFieldPage() {
                     ))}
                   </div>
 
-                  <div className="flex items-center justify-between text-xs font-bold text-rust-500 pt-1">
-                    <span className="link-text">{isSelected ? 'Selected Track' : 'Select Track'}</span>
-                    <ArrowRight className="arrow-icon w-4 h-4" />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleFieldSelect(fieldItem, e)}
+                    className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs transition-all flex items-center justify-between cursor-pointer mt-1 ${
+                      isSelected
+                        ? 'bg-rust-500 text-white shadow-glow-rust hover:bg-rust-600'
+                        : 'bg-rust-100 text-rust-700 hover:bg-rust-200 border border-rust-200 group-hover:bg-rust-500 group-hover:text-white'
+                    }`}
+                  >
+                    <span>{isSelected ? '✓ Selected Track • Proceed to Companies' : 'Select Track'}</span>
+                    <ArrowRight className="arrow-icon w-4 h-4 transition-transform group-hover:translate-x-1" />
+                  </button>
                 </div>
 
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Sticky Bottom Proceed Bar */}
+      {selectedField && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-2xl px-4 animate-in fade-in slide-in-from-bottom duration-300">
+          <div className="bg-warmtext-900 text-white rounded-2xl p-4 shadow-warm-lg flex items-center justify-between gap-4 border border-rust-500/30 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rust-500 text-white flex items-center justify-center font-bold">
+                ✓
+              </div>
+              <div>
+                <p className="text-[11px] text-peach-300 font-mono uppercase tracking-wider">Current Selection</p>
+                <p className="font-serif font-bold text-sm text-white">{selectedField.name}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/companies')}
+              className="py-2.5 px-5 bg-rust-500 hover:bg-rust-600 text-white rounded-xl text-xs font-bold transition shadow-glow-rust flex items-center gap-2 cursor-pointer shrink-0 hover:scale-[1.02]"
+            >
+              <span>Proceed to Companies</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 

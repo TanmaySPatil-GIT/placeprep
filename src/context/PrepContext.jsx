@@ -342,15 +342,17 @@ export function PrepProvider({ children }) {
     return unsubscribe;
   }, []);
 
-  const selectField = async (fieldObj) => {
+  const selectField = (fieldObj) => {
     setSelectedField(fieldObj);
     setCurrentRoundIndex(0);
     clearAllRoundResults();
     try {
       localStorage.setItem('placeprep_selected_field', JSON.stringify(fieldObj));
-      if (auth.currentUser) {
+      if (auth.currentUser && auth.currentUser.uid && !auth.currentUser.uid.startsWith('guest_')) {
         const userRef = doc(db, 'users', auth.currentUser.uid);
-        await setDoc(userRef, { selectedField: fieldObj, targetField: fieldObj.name }, { merge: true });
+        setDoc(userRef, { selectedField: fieldObj, targetField: fieldObj.name }, { merge: true }).catch(err => {
+          console.warn('Firestore setDoc notice:', err);
+        });
       }
     } catch (e) {
       console.warn('Error saving selectedField:', e);
