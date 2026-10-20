@@ -559,8 +559,8 @@ export default function InterviewRoundPage() {
       if (!openingText) {
         console.log('[OpeningTurn Debug: TECHNICAL] 6. Using initial fallback opening question.');
         const firstQ = questionsBank[0] || INITIAL_INTERVIEW_QUESTIONS[0];
-        const initialText = firstQ.question || 'Tell me about yourself and your technical background.';
-        openingText = `Hi! Welcome to your ${companyName} mock interview for the ${targetField} track. Let's get started: ${initialText}`;
+        const initialText = firstQ.question || 'Explain your approach to designing scalable software systems.';
+        openingText = `Hi there, welcome to your ${companyName} technical interview for the ${targetField} role! I'm Dr. Alex Vance, Senior Tech Lead here. In this round, we'll explore core technical concepts and engineering trade-offs. To kick things off: ${initialText}`;
         isFallbackOpening = true;
       }
       currentQuestionIsFallbackRef.current = isFallbackOpening;

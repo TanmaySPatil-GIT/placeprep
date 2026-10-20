@@ -34,12 +34,21 @@ import {
   Brain,
   Users,
   Award,
-  Loader2
+  Loader2,
+  UserCheck,
+  MessageSquareText,
+  Target
 } from 'lucide-react';
 
 import { shuffleArray } from '../utils/shuffle';
 import ProgressStepper from '../components/ProgressStepper';
 
+const HR_PERSONA = {
+  name: 'Sarah Jenkins',
+  role: 'Senior People & Culture Partner',
+  badgeClass: 'bg-gold-100 text-gold-700 border-gold-200 font-bold',
+  avatarEmoji: '👥'
+};
 
 const RECENT_HR_STORAGE_KEY = 'placeprep_recent_hr_qids';
 
@@ -453,7 +462,7 @@ export default function HrInterviewRoundPage() {
       if (!initialGreeting) {
         console.log('[OpeningTurn Debug: HR] 6. Using initial fallback opening question.');
         const firstQ = questionsBank[0] || INITIAL_HR_QUESTIONS[0];
-        initialGreeting = `Welcome to Stage 6 of your ${companyName} placement drive — the HR & Culture Fit Interview. Let's begin: ${firstQ.question}`;
+        initialGreeting = `Hello and welcome to your ${companyName} HR & Culture Fit interview! I'm Sarah from the Talent Partner team. Today's conversation is all about getting to know your journey, how you communicate with teammates, and how you tackle challenges under pressure. To get us started: ${firstQ.question}`;
         isFallbackOpening = true;
       }
       currentQuestionIsFallbackRef.current = isFallbackOpening;
@@ -776,10 +785,100 @@ export default function HrInterviewRoundPage() {
       ) : !isFinished ? (
 
         /* LIVE HR INTERVIEW INTERFACE */
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
           
-          {/* Left Column: AI Interviewer & Webcam */}
-          <div className="md:col-span-2 space-y-4">
+          {/* Left Column: AI Interviewer Avatar Card */}
+          <div className="w-full lg:w-1/2 bg-forest-900 border border-forest-600/30 rounded-2xl p-5 shadow-earthy flex flex-col justify-between relative overflow-hidden min-h-[460px]">
+            {/* Header Info */}
+            <div className="flex items-center justify-between z-10">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">{HR_PERSONA.avatarEmoji}</span>
+                <div>
+                  <h3 className="text-sm font-bold text-white">{HR_PERSONA.name}</h3>
+                  <p className="text-[11px] text-sage-300">{HR_PERSONA.role} @ {companyName}</p>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] bg-mint-100 text-leaf-800 border-warmborder font-bold">
+                Stage 6 HR Screen
+              </span>
+            </div>
+
+            {/* Avatar Center Animation */}
+            <div className="my-auto py-6 flex flex-col items-center justify-center text-center space-y-4 z-10">
+              <div className="relative">
+                <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 ${
+                  aiState === 'speaking' ? 'bg-gradient-to-r from-accent-gold/40 to-sage-400/40 animate-ping ring-4 ring-accent-gold/50'
+                  : aiState === 'listening' ? 'bg-earth-terracotta/30 animate-pulse ring-4 ring-earth-terracotta/40'
+                  : aiState === 'thinking' ? 'bg-forest-600/50 animate-spin border-2 border-dashed border-accent-gold'
+                  : 'bg-forest-900 border border-forest-600/40 shadow-earthy'
+                }`}>
+                  <div className="w-24 h-24 rounded-full bg-forest-900 border border-forest-600/40 flex items-center justify-center shadow-inner">
+                    {aiState === 'thinking' ? (
+                      <Loader2 className="w-10 h-10 text-leaf-600 animate-spin" />
+                    ) : (
+                      <UserCheck className={`w-10 h-10 transition-colors ${
+                        aiState === 'speaking' ? 'text-leaf-600 animate-bounce'
+                        : aiState === 'listening' ? 'text-gold-600'
+                        : 'text-darkcharcoal-700'
+                      }`} />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* State Pill */}
+              <div className="space-y-1">
+                <span className={`px-3.5 py-1 rounded-full text-xs font-extrabold border inline-flex items-center gap-1.5 shadow-warm-sm ${
+                  aiState === 'speaking' ? 'bg-mint-100 border-warmborder text-leaf-700'
+                  : aiState === 'listening' ? 'bg-[#FDF3F3] border-[#F0C2C2] text-[#D32F2F]'
+                  : aiState === 'thinking' ? 'bg-mint-50 border-warmborder text-leaf-600'
+                  : 'bg-white border-warmborder text-darkcharcoal-700'
+                }`}>
+                  {aiState === 'speaking' && <Volume2 className="w-3.5 h-3.5 animate-pulse text-leaf-600" />}
+                  {aiState === 'listening' && <Mic className="w-3.5 h-3.5 animate-pulse text-[#D32F2F]" />}
+                  {aiState === 'thinking' && <Loader2 className="w-3.5 h-3.5 animate-spin text-leaf-600" />}
+                  <span>
+                    {aiState === 'speaking' ? `${HR_PERSONA.name} speaking aloud...`
+                    : aiState === 'listening' ? 'Listening to your response...'
+                    : aiState === 'thinking' ? 'Evaluating behavior & preparing question...'
+                    : 'Interviewer Ready'}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            {/* STAR Response Method Guide Pill */}
+            <div className="mb-2 p-2.5 bg-forest-800/70 border border-forest-600/30 rounded-xl space-y-1 z-10 text-left">
+              <div className="flex items-center justify-between text-[11px] font-bold text-sage-200">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-accent-gold" /> STAR Evaluation Standard
+                </span>
+                <span className="text-[10px] text-accent-gold font-mono">HR Behavioral Model</span>
+              </div>
+              <p className="text-[10px] text-sage-300 leading-snug">
+                Structure your answers with: <strong>Situation</strong> (context), <strong>Task</strong> (challenge), <strong>Action</strong> (what YOU specifically did), and <strong>Result</strong> (impact & metrics).
+              </p>
+            </div>
+
+            {/* Spoken Question Box */}
+            <div className="space-y-2 z-10 mt-auto">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sage-300 font-heading">
+                  <MessageSquareText className="w-3.5 h-3.5 text-accent-gold" /> Current HR Question
+                </span>
+                <span className="text-[10px] text-sage-400">
+                  Question {questionIdx + 1} of 8
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-mint-50 border border-warmborder text-xs sm:text-sm leading-relaxed font-serif text-darkcharcoal-900 min-h-[90px] flex items-center justify-center text-center">
+                <p>&quot;{currentSpokenQuestion || questionsBank[questionIdx]?.question}&quot;</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Candidate Webcam & Live Transcript Controls */}
+          <div className="w-full lg:w-1/2 space-y-4">
             
             {/* Webcam Feed Container */}
             <div className="relative rounded-[32px] bg-darkcharcoal-900 aspect-video overflow-hidden border border-warmborder shadow-warm-sm flex items-center justify-center">
@@ -803,11 +902,11 @@ export default function HrInterviewRoundPage() {
                   <span className={`w-2.5 h-2.5 rounded-full ${isAnswering ? 'bg-red-500 animate-ping' : aiState === 'thinking' ? 'bg-amber-500 animate-pulse' : 'bg-leaf-500'}`}></span>
                   <span className="font-bold">
                     {isAnswering 
-                      ? 'Recording HR Answer...' 
+                      ? 'Recording Your Answer...' 
                       : aiState === 'thinking' 
-                      ? 'Evaluating Response & Advancing...' 
+                      ? 'Evaluating Response...' 
                       : aiState === 'speaking' 
-                      ? 'HR Interviewer Speaking...' 
+                      ? 'Sarah Speaking...' 
                       : 'Ready for Response'}
                   </span>
                 </div>
@@ -823,6 +922,7 @@ export default function HrInterviewRoundPage() {
                   type="button"
                   onClick={() => setMicActive(prev => !prev)}
                   className={`p-3 rounded-full border text-xs font-semibold transition-colors ${micActive ? 'bg-mint-100 text-leaf-700 border-warmborder' : 'bg-[#FDF3F3] text-[#D32F2F] border-[#F0C2C2]'}`}
+                  title={micActive ? 'Mute Microphone' : 'Unmute Microphone'}
                 >
                   {micActive ? <Mic className="w-4 h-4 text-leaf-600" /> : <MicOff className="w-4 h-4 text-[#D32F2F]" />}
                 </button>
@@ -830,6 +930,7 @@ export default function HrInterviewRoundPage() {
                   type="button"
                   onClick={() => setVideoActive(prev => !prev)}
                   className={`p-3 rounded-full border text-xs font-semibold transition-colors ${videoActive ? 'bg-mint-100 text-leaf-700 border-warmborder' : 'bg-[#FDF3F3] text-[#D32F2F] border-[#F0C2C2]'}`}
+                  title={videoActive ? 'Disable Video' : 'Enable Video'}
                 >
                   {videoActive ? <VideoIcon className="w-4 h-4 text-leaf-600" /> : <VideoOff className="w-4 h-4 text-[#D32F2F]" />}
                 </button>
@@ -845,7 +946,7 @@ export default function HrInterviewRoundPage() {
                   {aiState === 'thinking' ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>AI Evaluating Response...</span>
+                      <span>Evaluating Response...</span>
                     </>
                   ) : (
                     <>
@@ -857,7 +958,7 @@ export default function HrInterviewRoundPage() {
               ) : (
                 <button
                   type="button"
-                  onClick={handleStopAnswer}
+                  onClick={() => handleStopAnswer()}
                   className="px-6 py-2.5 rounded-full bg-leaf-600 hover:bg-leaf-700 text-white font-extrabold text-xs shadow-warm-md transition-colors flex items-center gap-2"
                 >
                   <CheckCircle2 className="w-4 h-4" />
@@ -866,36 +967,13 @@ export default function HrInterviewRoundPage() {
               )}
             </div>
 
-          </div>
-
-          {/* Right Column: HR Question Card & Transcript */}
-          <div className="space-y-4">
-            
-            <div className="rounded-[32px] bg-white p-6 border border-warmborder space-y-4 shadow-warm-sm">
-              <div className="flex items-center justify-between border-b border-warmborder pb-3">
-                <span className="text-xs font-bold text-leaf-600 font-serif">
-                  HR Question {questionIdx + 1} of {questionsBank.length}
-                </span>
-                <span className="text-[10px] text-darkcharcoal-500 font-mono">Stage 6 HR Screen</span>
-              </div>
-
-              {aiState === 'thinking' && (
-                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2.5 font-semibold animate-pulse">
-                  <Loader2 className="w-4 h-4 animate-spin text-amber-600 shrink-0" />
-                  <span>Evaluating answer & preparing next scenario... (Waking up backend server if cold starting)</span>
-                </div>
-              )}
-
-              <h3 className="text-base font-bold font-serif text-darkcharcoal-900 leading-relaxed">
-                {currentSpokenQuestion || questionsBank[questionIdx]?.question}
-              </h3>
-
-
-              <div className="pt-2">
-                <label className="text-[11px] font-bold text-leaf-600 block mb-1">Live Audio Transcript:</label>
-                <div className="p-3 rounded-2xl bg-mint-50 border border-warmborder min-h-[100px] text-xs text-darkcharcoal-700 font-sans italic">
-                  {liveTranscript || (isAnswering ? 'Listening... Speak clearly into your microphone.' : 'Click "Start Microphone Answer" to begin speaking.')}
-                </div>
+            {/* Live Audio Transcript Box */}
+            <div className="rounded-2xl bg-white p-4 border border-warmborder shadow-warm-sm space-y-2">
+              <label className="text-[11px] font-bold text-leaf-600 flex items-center gap-1.5">
+                <Mic className="w-3.5 h-3.5 text-leaf-600" /> Live Spoken Audio Transcript:
+              </label>
+              <div className="p-3.5 rounded-xl bg-mint-50 border border-warmborder min-h-[90px] text-xs text-darkcharcoal-700 font-sans italic leading-relaxed">
+                {liveTranscript || (isAnswering ? 'Listening... Speak naturally about your experience.' : 'Click "Start Microphone Answer" to respond to Sarah.')}
               </div>
             </div>
 

@@ -1207,7 +1207,24 @@ def evaluate_answer():
 
     ans_clean = student_answer.strip().lower()
 
-    # Pre-check A: "don't know" phrases
+    # Pre-check A1: Skip requests
+    if any(p in ans_clean for p in ["skip this question", "skip the question", "skip question", "skip this", "can we skip", "skip please", "pass on this", "pass this", "next question", "leave this", "can we move on", "move to next"]):
+        quote = student_answer.strip()
+        return jsonify({
+            "verdict": "dont_know",
+            "conceptsCorrect": [],
+            "conceptsWrong": [],
+            "conceptsMissing": key_concepts,
+            "evidenceQuote": quote,
+            "rubricVersion": rubric_version,
+            "modelUsed": "deterministic-precheck",
+            "uncertainty": "low",
+            "confidenceOfStudent": "low",
+            "followUpWorthy": True,
+            "reason": f"Candidate explicitly requested to skip or pass on {topic_name}."
+        })
+
+    # Pre-check A2: "don't know" phrases
     if any(p in ans_clean for p in ["don't know", "dont know", "not sure", "no idea", "idk", "have no clue"]):
         quote = student_answer.strip()
         return jsonify({
@@ -1708,16 +1725,23 @@ def generate_question():
     concepts_missing = evaluator_output.get('conceptsMissing', [])
     eval_reason = evaluator_output.get('reason', '')
 
+    is_hr = (str(round_type).lower() == 'hr') or ('behavioral' in topic_name.lower()) or ('behavioral' in str(current_topic_id).lower())
+
     # Special opening question generation
     if is_opening:
-        sample_q = rubric.get('sampleQuestion', f"Tell me about your experience with {topic_name}.")
+        sample_q = rubric.get('sampleQuestion', f"Tell me about your background and experience with {topic_name}.")
+        if is_hr:
+            interviewer_greeting = f"Hello and welcome to your {company_name} HR and Culture Fit interview! I'm Sarah from the Talent Partner team. Today's conversation is all about getting to know your journey, how you communicate with teammates, and how you tackle challenges under pressure. Feel free to structure your examples around real situations from your past projects or teamwork. To get us started: {sample_q}"
+        else:
+            interviewer_greeting = f"Hi there, welcome to your {company_name} technical interview for the {target_field} role! I'm Dr. Alex Vance, Senior Tech Lead here. In this round, we'll explore core engineering concepts and practical trade-offs—don't worry about memorizing textbook definitions; I'm mainly eager to hear how you reason through problems. To kick things off: {sample_q}"
+
         return jsonify({
             "decision": "ADVANCE",
             "probe_type": "opening",
-            "question": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}",
+            "question": interviewer_greeting,
             "evidence_to_probe": "Initial interview greeting",
             "competency": topic_name,
-            "interviewerResponse": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}",
+            "interviewerResponse": interviewer_greeting,
             "isFallback": False,
             "fallbackQuestion": False,
             "fallbackUsed": False,
@@ -1740,8 +1764,34 @@ def generate_question():
     }
     expected_decision = decision_map.get(strategy, 'PROBE')
 
-    prompt = f"""You are an experienced, human-like, engaging technical & behavioral interviewer at {company_name} conducting a {round_type.upper()} interview for the {target_field} role.
-Your task for this turn is FIXED by the interview decision engine: strategy="{strategy}" (decision="{expected_decision}").
+    if is_hr:
+        persona_instructions = f"""You are Sarah Jenkins, a friendly, perceptive Senior HR & Culture Fit Partner at {company_name} conducting a behavioral interview for the {target_field} role.
+Your evaluation standard is the STAR method (Situation, Task, Action, Result).
+Your conversational tone must be warm, encouraging, human, and professional (like a real top-tier tech HR partner having a genuine conversation, NOT an AI grading machine).
+
+BEHAVIORAL INTERVIEW GUIDELINES FOR STRATEGY "{strategy}" (DECISION: "{expected_decision}"):
+1. If strategy is "negotiate_skip": The candidate asked to skip or pass. In real HR screens, skipping leaves an empty signal. Acknowledge with genuine warmth: "No worries at all, take a breath! It doesn't have to be a giant company milestone—even a simple group project, class assignment, or hackathon where things got tricky works great. What comes to mind?"
+2. If strategy is "simplify_or_hint": The candidate said "I don't know" or feels stuck. Reassure them warmly and reframe the question around an everyday teamwork or project challenge they can easily relate to.
+3. If candidate used vague "we" statements ("we built...", "the team resolved..."): Follow up on their personal contribution: "That sounds like a great team effort! What was your specific personal role, and what key decision did you personally own?"
+4. If candidate described a conflict, failure, or problem without a tangible outcome or reflection: Ask for the result and retrospective: "How did the other person receive that, and looking back, what is the key lesson you took away?"
+5. If candidate gave a canned cliché ("I work too hard", "I never have conflict"): Playfully challenge it: "Perfectionism is a common answer, but real engineering requires shipping with constraints. What's a genuine skill or habit—technical or interpersonal—that you've actively worked on improving recently?"
+6. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": Warmly validate their story, then probe for the missing action, metric, or learning.
+7. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": Transition smoothly to the new competency ({topic_name}) with an authentic conversational bridge (e.g. "That gives great context on your teamwork. Now, let's look at another important area...").
+8. Speak with human warmth and empathy. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
+    else:
+        persona_instructions = f"""You are Dr. Alex Vance, an experienced Senior Staff Software Engineer and Technical Interviewer at {company_name} conducting a technical interview for the {target_field} role.
+Your conversational tone is collegial, intellectually curious, sharp, and encouraging—like a senior engineer pairing with a colleague, NOT an AI bot.
+
+TECHNICAL INTERVIEW GUIDELINES FOR STRATEGY "{strategy}" (DECISION: "{expected_decision}"):
+1. If strategy is "negotiate_skip": The candidate asked to skip. In real tech interviews, pushing through uncertainty is a crucial signal. Acknowledge respectfully: "I know this question can feel tricky, but in a real technical screen, showing how you reason through uncertainty is key. Before we pass, what's your first instinct or a simple baseline approach?"
+2. If strategy is "simplify_or_hint": The candidate said "I don't know" or is stuck. Encourage them with an architectural hint or simplified sub-problem (e.g., "Let's strip away the scale for a second: suppose we only had a small dataset in memory—how would you solve it simply?").
+3. If strategy is "guiding_question_no_reveal" or student had misconceptions: Challenge their assumption with a realistic edge case or execution scenario (e.g., "Consider what happens under high concurrency or when the cache key expires—would that approach hold up? Walk me through what happens...").
+4. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": Acknowledge what was sound before probing the misconception or missing gap.
+5. If student gave a good or textbook answer: Probe real-world depth, production trade-offs, time/space complexity, or scalability limits.
+6. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": Transition naturally and smoothly to the new topic ({topic_name}).
+7. Speak like a senior tech peer. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
+
+    prompt = f"""{persona_instructions}
 
 EVALUATION SUMMARY OF CANDIDATE'S LAST RESPONSE:
 - What the student got right: {", ".join(concepts_correct) if concepts_correct else 'None'}
@@ -1757,18 +1807,11 @@ RECENT TURNS:
 PREVIOUSLY ASKED QUESTIONS IN THIS SESSION (DO NOT REPEAT OR RE-ASK ANY OF THESE):
 {asked_formatted}
 
-GENERATION INSTRUCTIONS FOR THIS TURN:
-Ask EXACTLY ONE natural, conversational turn that sounds like a real, experienced human interviewer:
-1. Directly references what the student just said — never ignore their actual response.
-2. If strategy is "negotiate_skip": The candidate asked to skip. Act like a real interviewer: do NOT blindly let them skip without probing. Acknowledge their hesitation, remind them that interviewers evaluate problem-solving intuition even when stuck, and negotiate by asking: "Before we pass on this, what is your initial gut feel or simplified approach?"
-3. If strategy is "simplify_or_hint": The candidate said "I don't know" or is stuck. Encourage them warmly: give a small concrete hint or ask a simpler sub-question so they can demonstrate reasoning.
-4. If strategy is "repeat_question": politely restate or clarify the previous question with fresh phrasing.
-5. If strategy is "simplify_question": ask a simplified, breakdown version of the previous question.
-6. If strategy is "guiding_question_no_reveal" or student gave an incorrect answer: challenge their assumption directly with a real-world scenario (e.g., "Consider what happens under high concurrency or an empty input—would that approach hold up? Walk me through what happens...").
-7. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": briefly acknowledge what was sound before probing the misconception or missing gap.
-8. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": transition naturally and smoothly to the new topic ({topic_name}).
-9. Speak with warmth, encouragement, and professional rigor. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?).
-10. CRITICAL ANTI-REPETITION: You MUST NOT ask any question that has already been asked. Explore a completely fresh question or scenario on {topic_name}.
+CRITICAL RULES:
+1. Speak with natural conversational flow, directly referencing what the candidate just said. Never ignore their actual answer.
+2. Keep the entire response to 1-2 spoken sentences.
+3. Include EXACTLY ONE question mark (?) at the end.
+4. CRITICAL ANTI-REPETITION: You MUST NOT ask any question that has already been asked. Explore a completely fresh question or scenario on {topic_name}.
 
 Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT structure:
 {{
