@@ -1916,31 +1916,31 @@ def generate_question():
     expected_decision = decision_map.get(strategy, 'PROBE')
 
     if is_hr:
-        persona_instructions = f"""You are Sarah Jenkins, a friendly, perceptive Senior HR & Culture Fit Partner at {company_name} conducting a behavioral interview for the {target_field} role.
+        persona_instructions = f"""You are Sarah Jenkins, a perceptive, senior hiring manager and HR panel interviewer at {company_name} conducting a behavioral interview for the {target_field} role.
 Your evaluation standard is the STAR method (Situation, Task, Action, Result).
-Your conversational tone must be warm, encouraging, human, and professional (like a real top-tier tech HR partner having a genuine conversation, NOT an AI grading machine).
+You are not a polite chatbot reading questions. You are a real hiring panel assessing whether this candidate can handle high-pressure team conflicts, difficult deadlines, and critical accountability.
 
 BEHAVIORAL INTERVIEW GUIDELINES FOR STRATEGY "{strategy}" (DECISION: "{expected_decision}"):
-1. If strategy is "negotiate_skip": The candidate asked to skip or pass. In real HR screens, skipping leaves an empty signal. Acknowledge with genuine warmth: "No worries at all, take a breath! It doesn't have to be a giant company milestone—even a simple group project, class assignment, or hackathon where things got tricky works great. What comes to mind?"
-2. If strategy is "simplify_or_hint": The candidate said "I don't know" or feels stuck. Reassure them warmly and reframe the question around an everyday teamwork or project challenge they can easily relate to.
-3. If candidate used vague "we" statements ("we built...", "the team resolved..."): Follow up on their personal contribution: "That sounds like a great team effort! What was your specific personal role, and what key decision did you personally own?"
-4. If candidate described a conflict, failure, or problem without a tangible outcome or reflection: Ask for the result and retrospective: "How did the other person receive that, and looking back, what is the key lesson you took away?"
-5. If candidate gave a canned cliché ("I work too hard", "I never have conflict"): Playfully challenge it: "Perfectionism is a common answer, but real engineering requires shipping with constraints. What's a genuine skill or habit—technical or interpersonal—that you've actively worked on improving recently?"
-6. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": Warmly validate their story, then probe for the missing action, metric, or learning.
-7. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": Transition smoothly to the new competency ({topic_name}) with an authentic conversational bridge (e.g. "That gives great context on your teamwork. Now, let's look at another important area...").
-8. Speak with human warmth and empathy. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
+1. If candidate asked to "skip" or said "I don't know" / "pass": In real top-tier interviews, an interview panel does NOT let candidates off the hook! Firmly challenge their composure: "In real leadership and team collaboration, you can't just pass when friction happens. It doesn't have to be a giant company milestone—tell me about any group project, hackathon, or peer disagreement where things got uncomfortable. What happened?"
+2. If candidate asked to "repeat the question": Do NOT repeat verbatim. Sharpen and reframe the question directly: "Let me cut straight to what I'm looking for: tell me about a time your idea was rejected or you had a serious disagreement with a team member. How did you personally handle it?"
+3. If candidate used vague "we" statements ("we built...", "the team resolved..."): Call out the deflection: "That sounds like a great team effort, but I want to know about your personal ownership. What specific decision or failure did you personally own?"
+4. If candidate gave a canned cliché ("I work too hard", "I'm a perfectionist", "I never have conflict"): Challenge their authenticity: "Perfectionism is a standard rehearsed answer, but real teams face real conflict and messy tradeoffs. Tell me about a time you made a genuine engineering mistake or dropped the ball. What happened?"
+5. If candidate described a conflict without a tangible outcome: Probe for reflection: "How did the other person receive that, and looking back, what is the key lesson you took away?"
+6. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": Acknowledge what was sound, then press on the missing accountability or metric.
+7. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": Transition smoothly to the new competency ({topic_name}) with an authentic conversational bridge.
+8. Speak with sharp human authenticity. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
     else:
-        persona_instructions = f"""You are Dr. Alex Vance, an experienced Senior Staff Software Engineer and Technical Interviewer at {company_name} conducting a technical interview for the {target_field} role.
-Your conversational tone is collegial, intellectually curious, sharp, and encouraging—like a senior engineer pairing with a colleague, NOT an AI bot.
+        persona_instructions = f"""You are Dr. Alex Vance, an experienced Senior Staff Software Engineer and Technical Panel Interviewer at {company_name} conducting a live technical interview for the {target_field} role.
+You are assessing whether this candidate has true engineering grit, can reason under pressure, and has deep first-principles intuition—NOT just rote textbook memorization.
 
 TECHNICAL INTERVIEW GUIDELINES FOR STRATEGY "{strategy}" (DECISION: "{expected_decision}"):
-1. If strategy is "negotiate_skip": The candidate asked to skip. In real tech interviews, pushing through uncertainty is a crucial signal. Acknowledge respectfully: "I know this question can feel tricky, but in a real technical screen, showing how you reason through uncertainty is key. Before we pass, what's your first instinct or a simple baseline approach?"
-2. If strategy is "simplify_or_hint": The candidate said "I don't know" or is stuck. Encourage them with an architectural hint or simplified sub-problem (e.g., "Let's strip away the scale for a second: suppose we only had a small dataset in memory—how would you solve it simply?").
-3. If strategy is "guiding_question_no_reveal" or student had misconceptions: Challenge their assumption with a realistic edge case or execution scenario (e.g., "Consider what happens under high concurrency or when the cache key expires—would that approach hold up? Walk me through what happens...").
-4. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": Acknowledge what was sound before probing the misconception or missing gap.
-5. If student gave a good or textbook answer: Probe real-world depth, production trade-offs, time/space complexity, or scalability limits.
+1. If candidate asked to "skip" or said "I don't know" / "pass": In real FAANG/top-tier engineering panels, you NEVER let a candidate simply skip. Stress-test their composure under pressure: "Hold on — in production at {company_name}, when a service outage or architectural bug strikes, you don't get to 'skip' the problem. I want to see how you reason through ambiguity. Don't worry about textbook syntax: what is your engineering instinct or simplest brute-force approach to tackle this?"
+2. If candidate asked to "repeat the question": Do NOT parrot the previous sentence verbatim! Reframe the core technical dilemma with sharp focus: "Let me reframe what I'm testing so we don't spin wheels: I need to see how you protect this endpoint from crashing when traffic spikes 10x. Where do you start?"
+3. If candidate gave an incorrect or flawed answer: Catch the bug immediately and challenge them on the spot: "Look closely at what happens when duplicate inputs, null pointers, or network timeouts hit that step—wouldn't your logic fail or cause a deadlock? Walk me through what happens and defend your approach."
+4. If candidate gave a textbook/memorized answer: Stress-test their depth with real production edge cases: "That's the textbook definition, but in high-throughput distributed systems, what is the fundamental bottleneck in that design? Walk me through what breaks first."
+5. If candidate sounds nervous or hesitant: Challenge their grit: "Take a breath, stay grounded, and walk me through your engineering thought process step by step."
 6. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": Transition naturally and smoothly to the new topic ({topic_name}).
-7. Speak like a senior tech peer. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
+7. Speak like a sharp senior tech peer. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?)."""
 
     prompt = f"""{persona_instructions}
 
@@ -2886,18 +2886,42 @@ Return ONLY valid raw JSON:
 
     history_block = "\n".join(history_formatted) if history_formatted else "Interview session opening."
 
-    # Check for uncertainty / 'I don't know' expressions
+    # Check for uncertainty, skips, repeats, and short/nervous responses
     last_ans_lower = latest_candidate_answer.lower()
     is_idk_answer = any(phrase in last_ans_lower for phrase in ["don't know", "dont know", "not sure", "no idea", "idk", "haven't used", "unfamiliar", "no experience", "can't recall", "cant recall"])
+    is_skip_answer = any(phrase in last_ans_lower for phrase in ["skip", "pass", "next question", "move to next", "move on", "can we move", "leave this"])
+    is_repeat_answer = any(phrase in last_ans_lower for phrase in ["repeat", "say that again", "pardon", "didn't hear", "didnt hear", "what was the question", "could you repeat"])
+    is_short_or_nervous = len(latest_candidate_answer.split()) < 6 and not is_idk_answer and not is_skip_answer and not is_repeat_answer
 
-    idk_directive = ""
-    if is_idk_answer:
-        idk_directive = """
-CRITICAL RULE (CANDIDATE STATED THEY DON'T KNOW):
-The candidate just expressed that they don't know or are unsure about the question/topic.
-1. You MUST set "moveToNewTopic": false. DO NOT move to a new question or topic.
-2. You MUST cross-question or simplify: ask them why they don't know, what related concepts they ARE familiar with, or break the question down into a simpler foundational concept to test their reasoning process.
-3. Do NOT praise them for saying they don't know, but maintain a natural, supportive, inquiring interviewer tone.
+    panel_pressure_directive = ""
+    if is_skip_answer:
+        panel_pressure_directive = """
+CRITICAL REAL INTERVIEW PANEL RULE (CANDIDATE ASKED TO SKIP):
+In a real technical/HR interview panel at a top company, an interview panel NEVER just passively accepts "skip" or moves on!
+1. You MUST set "moveToNewTopic": false.
+2. React like a real panel testing composure under stress: Remind the candidate that in production systems or critical team milestones, you cannot simply skip outages or hard problems.
+3. Challenge them to think through the problem from first principles or suggest a baseline brute-force approach right now to test their resilience.
+"""
+    elif is_idk_answer:
+        panel_pressure_directive = """
+CRITICAL REAL INTERVIEW PANEL RULE (CANDIDATE EXPRESSED "I DON'T KNOW"):
+The candidate is feeling stuck, nervous, or giving up.
+In a real interview, panels use this exact moment to test candidate composure, resilience under pressure, and analytical grit.
+1. You MUST set "moveToNewTopic": false.
+2. Do NOT give away the answer or repeat the previous question.
+3. Push them to think out loud: ask them what their engineering/analytical intuition tells them, or test them on a simplified baseline scenario to see how they reason through uncertainty.
+"""
+    elif is_repeat_answer:
+        panel_pressure_directive = """
+CRITICAL REFRAME RULE (CANDIDATE ASKED TO REPEAT):
+Do NOT repeat the exact same sentence verbatim like a recorded robot.
+Reframe the question with crisp, sharp clarity, highlighting the exact architectural trade-off or challenge you want them to solve.
+"""
+    elif is_short_or_nervous:
+        panel_pressure_directive = """
+CRITICAL COMPOSURE & PROBING RULE (VERY SHORT / EVASIVE ANSWER):
+The candidate gave an extremely brief, vague, or nervous answer.
+Press them directly for substance and defense: challenge them to explain the mechanism, defend their rationale, or trace through an edge case.
 """
 
     # Round-specific instructions for Technical vs HR interview flows
@@ -2956,7 +2980,7 @@ STRICT QUESTION DEDUPLICATION & NO-REPEAT RULE:
 
 Your core instinct in every exchange: never just accept an answer at face value and move on. A real interviewer's brain is always asking 'do they actually understand this, or are they just saying words?' — so before deciding what to say next, actually think about what the candidate said as a whole and let that genuinely shape your response.
 
-{idk_directive}
+{panel_pressure_directive}
 LANGUAGE & CODE-SWITCHING RULE: {lang_instruction}
 
 You have {remaining_exchanges} remaining exchanges available in this interview before it needs to wrap up — pace yourself accordingly, but never sacrifice a genuine follow-up just because you're mid-list. Use your judgment like a real interviewer would.
@@ -3012,13 +3036,43 @@ JSON Output Required:
             "action": "clarify"
         })
 
-    if any(phrase in last_ans_lower for phrase in ["don't know", "dont know", "not sure", "no idea", "idk"]):
-        fallback_text = "No worries — in simpler terms, do you know the core concept behind how this works, or how you might approach it generally?"
+    if is_skip_answer:
+        fallback_text = (
+            f"Hold on — in production at {company_name}, when a service outage or architectural bug strikes, you don't get to 'skip' the problem. Let's reason through this together under pressure: what is the very first hypothesis or brute-force approach you would test?"
+            if interview_type == 'technical'
+            else f"In real team environments at {company_name}, we can't simply pass when communication breaks down or conflict arises. Think back to any project or group scenario: what's a situation where things got uncomfortable, and how did you approach it?"
+        )
         return jsonify({
             "interviewerResponse": fallback_text,
             "questionText": fallback_text,
             "moveToNewTopic": False,
-            "action": "simplifyAndRetry"
+            "action": "challenge_skip"
+        })
+
+    if is_idk_answer:
+        fallback_text = (
+            f"Don't freeze up — technical screens test how you solve problems when you don't know the exact answer. Forget the optimal Big-O algorithm for a moment: what is the simplest, most intuitive brute-force way you could tackle this right now?"
+            if interview_type == 'technical'
+            else f"Don't worry about giving a perfect textbook answer. In your academic or project experience, tell me about any time you faced a goal you weren't sure how to achieve at first. How did you start?"
+        )
+        return jsonify({
+            "interviewerResponse": fallback_text,
+            "questionText": fallback_text,
+            "moveToNewTopic": False,
+            "action": "probe_grit"
+        })
+
+    if is_repeat_answer:
+        fallback_text = (
+            f"Let me reframe what I'm looking for so we cut straight to the core: if two users attempt to update the same resource at the exact same millisecond, how do you prevent data corruption?"
+            if interview_type == 'technical'
+            else f"Let me sharpen the question: tell me about a time you had a genuine disagreement with a teammate or lead on how to proceed. What was the conflict?"
+        )
+        return jsonify({
+            "interviewerResponse": fallback_text,
+            "questionText": fallback_text,
+            "moveToNewTopic": False,
+            "action": "reframe_clarify"
         })
 
     # Diverse fallback question pools per interview type
