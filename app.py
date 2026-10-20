@@ -2,6 +2,10 @@ import os
 import re
 import json
 import base64
+import time
+import threading
+from collections import defaultdict, deque
+from functools import wraps
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -11,6 +15,72 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB maximum payload limit to prevent DoS
+
+class SlidingWindowRateLimiter:
+    """Thread-safe in-memory sliding window rate limiter per client IP."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._requests = defaultdict(deque)
+
+    def is_allowed(self, client_key: str, max_requests: int = 30, window_seconds: int = 60) -> tuple:
+        now = time.time()
+        with self._lock:
+            q = self._requests[client_key]
+            # Evict timestamps older than sliding window
+            while q and q[0] <= now - window_seconds:
+                q.popleft()
+            
+            if len(q) >= max_requests:
+                oldest = q[0]
+                retry_after = max(1, int(oldest + window_seconds - now))
+                return False, retry_after
+            
+            q.append(now)
+            return True, 0
+
+rate_limiter = SlidingWindowRateLimiter()
+
+def get_client_ip():
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+def rate_limit(max_requests=30, window_seconds=60):
+    """Decorator to enforce per-IP sliding window rate limiting."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if request.method == 'OPTIONS':
+                return f(*args, **kwargs)
+            
+            ip = get_client_ip()
+            endpoint = request.endpoint or request.path
+            key = f"{ip}:{endpoint}"
+            
+            allowed, retry_after = rate_limiter.is_allowed(key, max_requests=max_requests, window_seconds=window_seconds)
+            if not allowed:
+                print(f"[RateLimiter] 429 Too Many Requests for IP {ip} on {endpoint}. Retry after {retry_after}s.")
+                resp = jsonify({
+                    "error": f"Rate limit reached ({max_requests} requests/min). Please slow down and wait {retry_after}s before retrying.",
+                    "statusCode": 429,
+                    "retryAfter": retry_after
+                })
+                resp.status_code = 429
+                resp.headers['Retry-After'] = str(retry_after)
+                return resp
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def sanitize_input_text(text: str, max_length: int = 25000) -> str:
+    """Guards against token exhaustion by truncating extreme spam inputs."""
+    if not isinstance(text, str):
+        return ""
+    if len(text) > max_length:
+        print(f"[InputGuard] Truncating oversized input from {len(text)} to {max_length} chars.")
+        return text[:max_length]
+    return text
 
 # Configure CORS with support for Vercel preview domains & explicit origins
 allowed_origins_env = os.getenv('ALLOWED_ORIGINS', '*').strip()
@@ -303,6 +373,7 @@ Return this exact JSON structure:
     })
 
 @app.route('/api/analyze-resume', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=15, window_seconds=60)
 def analyze_resume():
     if request.method == 'OPTIONS':
         return '', 200
@@ -514,6 +585,7 @@ Return this exact JSON structure:
 
 
 @app.route('/api/generate-resume-interview-questions', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=20, window_seconds=60)
 def generate_resume_interview_questions():
     if request.method == 'OPTIONS':
         return '', 200
@@ -1174,6 +1246,7 @@ def validate_evidence_quote(quote: str, transcript: str) -> bool:
 
 
 @app.route('/api/evaluate-answer', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=30, window_seconds=60)
 def evaluate_answer():
     if request.method == 'OPTIONS':
         return '', 200
@@ -1680,6 +1753,7 @@ def decide_next_step():
 
 
 @app.route('/api/generate-question', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=30, window_seconds=60)
 def generate_question():
     if request.method == 'OPTIONS':
         return '', 200
@@ -1944,6 +2018,7 @@ Do NOT ask multiple questions in one turn. Do NOT repeat any previously asked qu
 
 
 @app.route('/api/interview-session-turn', methods=['POST', 'OPTIONS'])
+@rate_limit(max_requests=30, window_seconds=60)
 def interview_session_turn():
     if request.method == 'OPTIONS':
         return '', 200
@@ -2646,6 +2721,7 @@ Return this exact JSON structure:
 
 
 @app.route('/api/interview-followup', methods=['POST'])
+@rate_limit(max_requests=30, window_seconds=60)
 def interview_followup():
     data = request.get_json() or {}
     company_name = data.get('selectedCompany', 'Google')
@@ -3275,6 +3351,7 @@ Return ONLY valid raw JSON with NO markdown code blocks, NO preamble:
 
 
 @app.route('/api/generate-final-report', methods=['POST'])
+@rate_limit(max_requests=20, window_seconds=60)
 def generate_final_report():
     data = request.get_json() or {}
     user_profile = data.get('userProfile', {})
