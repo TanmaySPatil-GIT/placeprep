@@ -28,7 +28,12 @@ import {
   CheckCircle2,
   RefreshCw,
   FileText,
-  Lightbulb
+  Lightbulb,
+  PenTool,
+  Move,
+  Eraser,
+  LayoutTemplate,
+  ArrowDownToLine
 } from 'lucide-react';
 
 const PALETTE_ITEMS = [
@@ -126,12 +131,20 @@ export default function SystemDesignRoundPage() {
   const [showHintModal, setShowHintModal] = useState(false);
   const [currentHintIdx, setCurrentHintIdx] = useState(0);
 
-  // Diagram Canvas State (Optional Visual Helper)
+  // Diagram Canvas & Interactive Whiteboard State
+  const boardRef = useRef(null);
+  const drawingCanvasRef = useRef(null);
+  const [canvasMode, setCanvasMode] = useState('select'); // 'select' (drag & link) | 'draw' (freehand pen)
+  const [penColor, setPenColor] = useState('#e8c088'); // gold, cyan, emerald, white
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [draggingNodeId, setDraggingNodeId] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
   const [nodes, setNodes] = useState([
-    { id: 'n-1', label: 'Client App', type: 'Client', x: 50, y: 140 },
-    { id: 'n-2', label: 'Nginx LB', type: 'Load Balancer', x: 220, y: 140 },
-    { id: 'n-3', label: 'API Cluster', type: 'App Server', x: 400, y: 140 },
-    { id: 'n-4', label: 'Redis Cache', type: 'Cache', x: 400, y: 30 }
+    { id: 'n-1', label: 'Client App', type: 'Client', x: 30, y: 150 },
+    { id: 'n-2', label: 'Nginx LB', type: 'Load Balancer', x: 160, y: 150 },
+    { id: 'n-3', label: 'API Cluster', type: 'App Server', x: 290, y: 150 },
+    { id: 'n-4', label: 'Redis Cache', type: 'Cache', x: 290, y: 50 }
   ]);
   const [edges, setEdges] = useState([
     { id: 'e-1', source: 'n-1', target: 'n-2' },
@@ -199,8 +212,8 @@ export default function SystemDesignRoundPage() {
       id: `n-${Date.now()}`,
       label: item.label,
       type: item.type,
-      x: 150 + Math.random() * 300,
-      y: 80 + Math.random() * 150
+      x: 100 + Math.random() * 200,
+      y: 60 + Math.random() * 140
     };
     setNodes(prev => [...prev, newNode]);
   };
@@ -213,6 +226,119 @@ export default function SystemDesignRoundPage() {
     } else {
       setSelectedNodeId(nodeId);
     }
+  };
+
+  const handleNodeMouseDown = (e, nodeId) => {
+    if (canvasMode !== 'select') return;
+    e.stopPropagation();
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    setDraggingNodeId(nodeId);
+    setSelectedNodeId(nodeId);
+    const rect = boardRef.current?.getBoundingClientRect();
+    if (rect) {
+      setDragOffset({
+        x: e.clientX - rect.left - node.x,
+        y: e.clientY - rect.top - node.y
+      });
+    }
+  };
+
+  const handleBoardMouseDown = (e) => {
+    if (canvasMode === 'draw') {
+      const canvas = drawingCanvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const ctx = canvas.getContext('2d');
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      setIsDrawing(true);
+    }
+  };
+
+  const handleBoardMouseMove = (e) => {
+    if (canvasMode === 'draw' && isDrawing) {
+      const canvas = drawingCanvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const ctx = canvas.getContext('2d');
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    } else if (canvasMode === 'select' && draggingNodeId) {
+      const rect = boardRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const rawX = e.clientX - rect.left - dragOffset.x;
+      const rawY = e.clientY - rect.top - dragOffset.y;
+      const clampedX = Math.max(10, Math.min(rect.width - 120, rawX));
+      const clampedY = Math.max(25, Math.min(rect.height - 45, rawY));
+      setNodes(prev => prev.map(n => n.id === draggingNodeId ? { ...n, x: clampedX, y: clampedY } : n));
+    }
+  };
+
+  const handleBoardMouseUp = () => {
+    setDraggingNodeId(null);
+    setIsDrawing(false);
+  };
+
+  const clearDrawingCanvas = () => {
+    const canvas = drawingCanvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
+  const handleLoadTemplate = (templateType = 'microservices') => {
+    if (templateType === 'microservices') {
+      const templateNodes = [
+        { id: 't-1', label: 'Client App', type: 'Client', x: 20, y: 140 },
+        { id: 't-2', label: 'CDN Edge', type: 'CDN', x: 130, y: 40 },
+        { id: 't-3', label: 'Nginx LB', type: 'Load Balancer', x: 130, y: 140 },
+        { id: 't-4', label: 'API Gateway', type: 'App Server', x: 240, y: 140 },
+        { id: 't-5', label: 'Redis Cache', type: 'Cache', x: 240, y: 40 },
+        { id: 't-6', label: 'PostgreSQL DB', type: 'Database', x: 350, y: 140 },
+        { id: 't-7', label: 'Kafka Queue', type: 'Message Queue', x: 240, y: 240 }
+      ];
+      const templateEdges = [
+        { id: 'te-1', source: 't-1', target: 't-3' },
+        { id: 'te-2', source: 't-1', target: 't-2' },
+        { id: 'te-3', source: 't-3', target: 't-4' },
+        { id: 'te-4', source: 't-4', target: 't-5' },
+        { id: 'te-5', source: 't-4', target: 't-6' },
+        { id: 'te-6', source: 't-4', target: 't-7' }
+      ];
+      setNodes(templateNodes);
+      setEdges(templateEdges);
+      setSelectedNodeId(null);
+      setConnectSourceId(null);
+    }
+  };
+
+  const handleSyncDiagramToText = () => {
+    if (nodes.length === 0) return;
+    const nodeDescriptions = nodes.map(n => `- ${n.label} (${n.type})`).join('\n');
+    const flowDescriptions = edges.map(e => {
+      const src = nodes.find(n => n.id === e.source)?.label || e.source;
+      const tgt = nodes.find(n => n.id === e.target)?.label || e.target;
+      return `[${src}] ---> [${tgt}]`;
+    }).join('\n');
+
+    const diagramMarkdown = `\n\n### Architecture Whiteboard Topology\n**Components (${nodes.length}):**\n${nodeDescriptions}\n\n**Data Flow Pipelines:**\n\`\`\`text\n${flowDescriptions || 'Independent nodes configured'}\n\`\`\``;
+
+    setTextApproach(prev => {
+      if (prev.includes('### Architecture Whiteboard Topology')) {
+        return prev.replace(/### Architecture Whiteboard Topology[\s\S]*$/, diagramMarkdown.trim());
+      }
+      return (prev.trim() + diagramMarkdown).trim();
+    });
   };
 
   const handleRemoveSelectedNode = () => {
@@ -500,15 +626,110 @@ export default function SystemDesignRoundPage() {
               })}
             </div>
 
-            {/* Interactive Canvas Board */}
-            <div className="relative w-full h-[320px] rounded-2xl bg-forest-950 border border-forest-600/40 p-3 overflow-hidden shadow-inner bg-grid-pattern">
-              <div className="absolute top-2 left-3 right-3 flex items-center justify-between text-[10px] text-earth-cream/60 z-10">
-                <span>Click node to select • Click Arrow icon to link</span>
-                <span className="font-mono">{nodes.length} Nodes • {edges.length} Edges</span>
+            {/* Whiteboard Mode Selector & Quick Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-2xl bg-forest-900 border border-forest-700/60 text-xs">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCanvasMode('select')}
+                  className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors ${
+                    canvasMode === 'select' ? 'bg-accent-gold text-forest-950 shadow-sm' : 'text-earth-cream/70 hover:text-white'
+                  }`}
+                >
+                  <Move className="w-3.5 h-3.5" />
+                  <span>Move & Link</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCanvasMode('draw')}
+                  className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-colors ${
+                    canvasMode === 'draw' ? 'bg-earth-terracotta text-white shadow-sm' : 'text-earth-cream/70 hover:text-white'
+                  }`}
+                >
+                  <PenTool className="w-3.5 h-3.5" />
+                  <span>Pen Sketch</span>
+                </button>
               </div>
 
+              {canvasMode === 'draw' && (
+                <div className="flex items-center gap-1.5 pl-2 border-l border-forest-700">
+                  <span className="text-[10px] text-earth-cream/60">Ink:</span>
+                  {[
+                    { color: '#e8c088', name: 'Gold' },
+                    { color: '#38bdf8', name: 'Cyan' },
+                    { color: '#34d399', name: 'Emerald' },
+                    { color: '#ffffff', name: 'White' }
+                  ].map(c => (
+                    <button
+                      key={c.color}
+                      type="button"
+                      onClick={() => setPenColor(c.color)}
+                      style={{ backgroundColor: c.color }}
+                      className={`w-4 h-4 rounded-full border ${penColor === c.color ? 'ring-2 ring-white scale-110' : 'border-forest-900'}`}
+                      title={c.name}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={clearDrawingCanvas}
+                    className="p-1 rounded text-earth-cream/60 hover:text-earth-terracotta transition-colors ml-1"
+                    title="Clear Ink Strokes"
+                  >
+                    <Eraser className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => handleLoadTemplate('microservices')}
+                  className="px-2.5 py-1.5 rounded-lg bg-forest-800 hover:bg-forest-700 text-earth-cream text-[10px] font-bold border border-forest-600/50 flex items-center gap-1 transition-colors"
+                  title="Populate with Microservices Architecture"
+                >
+                  <LayoutTemplate className="w-3 h-3 text-accent-gold" />
+                  <span>Template</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncDiagramToText}
+                  className="px-2.5 py-1.5 rounded-lg bg-forest-800 hover:bg-forest-700 text-accent-gold text-[10px] font-bold border border-accent-gold/40 flex items-center gap-1 transition-colors"
+                  title="Insert Whiteboard Diagram into Approach Text"
+                >
+                  <ArrowDownToLine className="w-3 h-3 text-accent-gold" />
+                  <span>Sync to Doc</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Interactive Canvas Board (Drag Nodes + Freehand Sketch Canvas) */}
+            <div 
+              ref={boardRef}
+              onMouseDown={handleBoardMouseDown}
+              onMouseMove={handleBoardMouseMove}
+              onMouseUp={handleBoardMouseUp}
+              onMouseLeave={handleBoardMouseUp}
+              className={`relative w-full h-[380px] rounded-2xl bg-forest-950 border border-forest-600/40 p-3 overflow-hidden shadow-inner select-none ${
+                canvasMode === 'draw' ? 'cursor-crosshair' : 'cursor-default'
+              }`}
+            >
+              <div className="absolute top-2 left-3 right-3 flex items-center justify-between text-[10px] text-earth-cream/60 z-20 pointer-events-none">
+                <span>{canvasMode === 'draw' ? 'Pen Mode: Draw annotations & network boundaries' : 'Select Mode: Drag nodes & connect arrows'}</span>
+                <span className="font-mono">{nodes.length} Nodes • {edges.length} Links</span>
+              </div>
+
+              {/* Freehand HTML5 Canvas Drawing Layer */}
+              <canvas
+                ref={drawingCanvasRef}
+                width={600}
+                height={380}
+                className="absolute inset-0 w-full h-full pointer-events-none z-10"
+              />
+
               {/* Draw Edges SVG */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
                 <defs>
                   <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8c088" />
@@ -522,9 +743,9 @@ export default function SystemDesignRoundPage() {
                     <line
                       key={edge.id}
                       x1={src.x + 55}
-                      y1={src.y + 20}
+                      y1={src.y + 18}
                       x2={tgt.x + 55}
-                      y2={tgt.y + 20}
+                      y2={tgt.y + 18}
                       stroke="#e8c088"
                       strokeWidth="2"
                       strokeDasharray="4"
@@ -534,7 +755,7 @@ export default function SystemDesignRoundPage() {
                 })}
               </svg>
 
-              {/* Render Drag Nodes */}
+              {/* Render Draggable Nodes */}
               {nodes.map((node) => {
                 const isSelected = selectedNodeId === node.id;
                 const isConnectSource = connectSourceId === node.id;
@@ -542,9 +763,15 @@ export default function SystemDesignRoundPage() {
                 return (
                   <div
                     key={node.id}
-                    onClick={() => handleNodeClick(node.id)}
+                    onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNodeClick(node.id);
+                    }}
                     style={{ left: `${node.x}px`, top: `${node.y}px` }}
-                    className={`absolute p-2.5 rounded-xl border text-[11px] font-bold cursor-pointer transition-all shadow-earthy select-none min-w-[110px] ${
+                    className={`absolute p-2.5 rounded-xl border text-[11px] font-bold transition-shadow shadow-earthy select-none min-w-[110px] z-20 ${
+                      canvasMode === 'select' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
+                    } ${
                       isSelected
                         ? 'bg-accent-gold text-forest-900 border-accent-gold ring-2 ring-accent-gold/40 scale-105'
                         : isConnectSource
@@ -552,9 +779,10 @@ export default function SystemDesignRoundPage() {
                         : 'bg-forest-900 text-earth-cream border-forest-600/60 hover:border-accent-gold'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1">
+                    <div className="flex items-center justify-between gap-1.5">
                       <span className="truncate">{node.label}</span>
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           setConnectSourceId(isConnectSource ? null : node.id);
@@ -584,11 +812,11 @@ export default function SystemDesignRoundPage() {
               </button>
 
               <button
-                onClick={() => { setNodes([]); setEdges([]); setSelectedNodeId(null); setConnectSourceId(null); }}
+                onClick={() => { setNodes([]); setEdges([]); setSelectedNodeId(null); setConnectSourceId(null); clearDrawingCanvas(); }}
                 className="flex-1 py-2 px-3 rounded-xl bg-forest-900 text-earth-cream/70 border border-forest-600/40 font-bold text-xs hover:text-white transition-all flex items-center justify-center gap-1"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Clear Canvas</span>
+                <span>Clear Whiteboard</span>
               </button>
             </div>
           </div>
