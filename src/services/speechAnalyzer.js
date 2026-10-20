@@ -4,8 +4,14 @@
  * and Web Speech API Confidence Segment Proxy.
  */
 
-// Target filler words list
-export const FILLER_WORDS = ['um', 'uh', 'like', 'you know', 'basically', 'actually', 'so', 'i mean'];
+// Comprehensive list of spoken filler words, hesitation disfluencies, and conversational crutches
+export const FILLER_WORDS = [
+  'um', 'umm', 'uh', 'uhh', 'er', 'erm', 'ah', 'hmm',
+  'like', 'basically', 'actually', 'literally', 'honestly', 'essentially',
+  'you know', 'you know what i mean', 'you see',
+  'kind of', 'sort of', 'i mean', 'i guess',
+  'so yeah', 'and all', 'or something', 'right', 'okay so'
+];
 
 /**
  * Analyze transcript text and return granular speech metrics per answer
@@ -37,17 +43,35 @@ export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, l
   const wordCount = words.length;
   const wordsPerMinute = Math.round((wordCount / safeDuration) * 60);
 
-  // 2. Filler Word Matches (Regex count for "um", "uh", "like", "you know", "basically", etc.)
+  // 2. Comprehensive Filler Word Matches (with regex support for elongated disfluencies like "ummm", "uhhh")
   const fillerBreakdown = {};
   let totalFillers = 0;
 
-  FILLER_WORDS.forEach((filler) => {
+  // Track elongated hesitation phonemes (um, umm, uh, uhh, er, erm, hmm)
+  const hesitationRegex = /\b(u+m+|u+h+|e+r+m*|a+h+|h+m+)\b/gi;
+  const hesitationMatches = text.match(hesitationRegex);
+  if (hesitationMatches && hesitationMatches.length > 0) {
+    fillerBreakdown['um/uh'] = hesitationMatches.length;
+    totalFillers += hesitationMatches.length;
+  }
+
+  // Check multi-word and distinct verbal crutches
+  const verbalCrutches = [
+    'like', 'basically', 'actually', 'literally', 'honestly', 'essentially',
+    'you know', 'you know what i mean', 'you see',
+    'kind of', 'sort of', 'i mean', 'i guess',
+    'so yeah', 'and all', 'or something', 'okay so'
+  ];
+
+  verbalCrutches.forEach((filler) => {
     const escaped = filler.replace(/\s+/g, '\\s+');
     const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
     const matches = text.match(regex);
     const count = matches ? matches.length : 0;
-    fillerBreakdown[filler] = count;
-    totalFillers += count;
+    if (count > 0) {
+      fillerBreakdown[filler] = count;
+      totalFillers += count;
+    }
   });
 
   // 3. Repeated 2-word phrase detection

@@ -1453,6 +1453,54 @@ def check_navigation_intent(student_answer: str) -> dict:
             'isNavigation': True
         }
 
+    skip_phrases = [
+        'skip this question',
+        'skip the question',
+        'can we skip',
+        'please skip',
+        'skip question',
+        'skip it',
+        'i want to skip',
+        'can i skip',
+        'next question',
+        'pass on this',
+        'pass this question',
+        'can we move on',
+        'move to next'
+    ]
+    if any(p in ans for p in skip_phrases):
+        return {
+            'strategy': 'negotiate_skip',
+            'topicAdvance': False,
+            'newDifficultyLevel': None,
+            'decisionState': 'CLARIFY',
+            'isNavigation': True
+        }
+
+    dont_know_phrases = [
+        "don't know",
+        "dont know",
+        "no idea",
+        "not sure",
+        "i have no clue",
+        "no clue",
+        "i don't know the answer",
+        "dont know the answer",
+        "idk",
+        "can't remember",
+        "cant remember",
+        "haven't heard of it",
+        "havent heard of it"
+    ]
+    if any(p in ans for p in dont_know_phrases):
+        return {
+            'strategy': 'simplify_or_hint',
+            'topicAdvance': False,
+            'newDifficultyLevel': None,
+            'decisionState': 'CLARIFY',
+            'isNavigation': True
+        }
+
     return None
 
 
@@ -1683,6 +1731,7 @@ def generate_question():
         'repeat_question': 'CLARIFY',
         'simplify_question': 'CLARIFY',
         'simplify_or_hint': 'CLARIFY',
+        'negotiate_skip': 'CLARIFY',
         'probe_missing_nuance': 'PROBE',
         'affirm_correct_part_and_crossquestion_wrong_part': 'PROBE',
         'guiding_question_no_reveal': 'PROBE',
@@ -1709,16 +1758,16 @@ PREVIOUSLY ASKED QUESTIONS IN THIS SESSION (DO NOT REPEAT OR RE-ASK ANY OF THESE
 {asked_formatted}
 
 GENERATION INSTRUCTIONS FOR THIS TURN:
-Ask EXACTLY ONE natural, conversational turn that:
+Ask EXACTLY ONE natural, conversational turn that sounds like a real, experienced human interviewer:
 1. Directly references what the student just said — never ignore their actual response.
-2. If strategy is "repeat_question": politely restate or clarify the previous question.
-3. If strategy is "simplify_question": ask a simplified, breakdown version of the previous question.
-4. If strategy is "guiding_question_no_reveal": ask a guiding question that lets the candidate self-correct without giving away the answer directly.
-5. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": briefly acknowledge what they got right before probing the misconception or missing gap.
-6. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": transition naturally to the new topic ({topic_name}).
-7. If strategy is "simplify_or_hint": provide a gentle hint or simplify the question to help them get started.
-8. Ask EXACTLY ONE question (maximum 1 question mark '?'). Do NOT string multiple questions together.
-9. Keep it to 1-2 concise, spoken sentences. Speak like a real interviewer, not a quiz reading out loud.
+2. If strategy is "negotiate_skip": The candidate asked to skip. Act like a real interviewer: do NOT blindly let them skip without probing. Acknowledge their hesitation, remind them that interviewers evaluate problem-solving intuition even when stuck, and negotiate by asking: "Before we pass on this, what is your initial gut feel or simplified approach?"
+3. If strategy is "simplify_or_hint": The candidate said "I don't know" or is stuck. Encourage them warmly: give a small concrete hint or ask a simpler sub-question so they can demonstrate reasoning.
+4. If strategy is "repeat_question": politely restate or clarify the previous question with fresh phrasing.
+5. If strategy is "simplify_question": ask a simplified, breakdown version of the previous question.
+6. If strategy is "guiding_question_no_reveal" or student gave an incorrect answer: challenge their assumption directly with a real-world scenario (e.g., "Consider what happens under high concurrency or an empty input—would that approach hold up? Walk me through what happens...").
+7. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": briefly acknowledge what was sound before probing the misconception or missing gap.
+8. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": transition naturally and smoothly to the new topic ({topic_name}).
+9. Speak with warmth, encouragement, and professional rigor. Keep it to 1-2 spoken sentences with EXACTLY ONE question mark (?).
 10. CRITICAL ANTI-REPETITION: You MUST NOT ask any question that has already been asked. Explore a completely fresh question or scenario on {topic_name}.
 
 Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT structure:

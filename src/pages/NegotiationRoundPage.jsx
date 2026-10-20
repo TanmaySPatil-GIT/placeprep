@@ -80,8 +80,8 @@ export default function NegotiationRoundPage() {
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US'; // Speech-to-Text locked to English
+      const browserLang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-IN';
+      recognition.lang = browserLang.startsWith('en') ? browserLang : 'en-IN';
 
       recognition.onresult = (event) => {
         let finalTranscript = '';

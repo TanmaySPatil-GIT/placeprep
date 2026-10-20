@@ -72,6 +72,58 @@ export function checkNavigationIntent(studentAnswer = '') {
     };
   }
 
+  // Skip Question Intent (Candidate requests to skip)
+  const skipPhrases = [
+    'skip this question',
+    'skip the question',
+    'can we skip',
+    'please skip',
+    'skip question',
+    'skip it',
+    'i want to skip',
+    'can i skip',
+    'next question',
+    'pass on this',
+    'pass this question',
+    'can we move on',
+    'move to next'
+  ];
+  if (skipPhrases.some(p => ans.includes(p))) {
+    return {
+      strategy: 'negotiate_skip',
+      topicAdvance: false,
+      newDifficultyLevel: null,
+      decisionState: INTERVIEW_STATES.CLARIFY,
+      isNavigation: true
+    };
+  }
+
+  // "Don't know" / Unsure Intent
+  const dontKnowPhrases = [
+    "don't know",
+    "dont know",
+    "no idea",
+    "not sure",
+    "i have no clue",
+    "no clue",
+    "i don't know the answer",
+    "dont know the answer",
+    "idk",
+    "can't remember",
+    "cant remember",
+    "haven't heard of it",
+    "havent heard of it"
+  ];
+  if (dontKnowPhrases.some(p => ans.includes(p))) {
+    return {
+      strategy: 'simplify_or_hint',
+      topicAdvance: false,
+      newDifficultyLevel: null,
+      decisionState: INTERVIEW_STATES.CLARIFY,
+      isNavigation: true
+    };
+  }
+
   return null;
 }
 

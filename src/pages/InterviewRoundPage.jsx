@@ -11,6 +11,7 @@ import { analyzeSpeechMetrics } from '../services/speechAnalyzer';
 import { 
   isTTSSupported, 
   getAvailableEnglishVoices, 
+  getBestNaturalVoice,
   speakText, 
   stopSpeech 
 } from '../services/speechSynthesizer';
@@ -229,8 +230,9 @@ export default function InterviewRoundPage() {
       const updateVoices = () => {
         const voices = getAvailableEnglishVoices();
         setAvailableVoices(voices);
-        if (voices.length > 0 && !selectedVoice) {
-          setSelectedVoice(voices[0]);
+        if (voices.length > 0) {
+          const natural = getBestNaturalVoice(selectedLanguage?.code || 'en-US');
+          setSelectedVoice(natural || voices[0]);
         }
       };
 
@@ -417,36 +419,44 @@ export default function InterviewRoundPage() {
   }, [cameraPermission, modelsReady, hasStartedSession, videoActive]);
 
   // 5. Initialize Web Speech Recognition
+  const accumulatedFinalRef = useRef('');
+
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'en-US'; // Speech-to-Text locked to English
+      // Support Indian English and user locale for maximum speech recognition accuracy
+      const browserLang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-IN';
+      recognition.lang = browserLang.startsWith('en') ? browserLang : 'en-IN';
 
       recognition.onresult = (event) => {
-        let fullTranscript = '';
+        let interimText = '';
         let confSum = 0;
         let confCount = 0;
 
-        for (let i = 0; i < event.results.length; ++i) {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
           const seg = event.results[i][0];
           if (seg.confidence && seg.confidence > 0) {
             confSum += seg.confidence;
             confCount++;
           }
-          fullTranscript += seg.transcript + ' ';
+          if (event.results[i].isFinal) {
+            accumulatedFinalRef.current += seg.transcript + ' ';
+          } else {
+            interimText += seg.transcript;
+          }
         }
 
         if (confCount > 0) {
           setLastSegmentConfidence(confSum / confCount);
         }
 
-        const cleanTranscript = fullTranscript.trim();
-        if (cleanTranscript) {
-          transcriptRef.current = cleanTranscript;
-          setLiveTranscript(cleanTranscript);
+        const combined = (accumulatedFinalRef.current + ' ' + interimText).replace(/\s+/g, ' ').trim();
+        if (combined) {
+          transcriptRef.current = combined;
+          setLiveTranscript(combined);
           lastSpeechTimeRef.current = Date.now();
         }
       };
@@ -586,6 +596,7 @@ export default function InterviewRoundPage() {
   // Candidate Starts Answer
   const handleStartAnswer = () => {
     stopSpeech();
+    accumulatedFinalRef.current = '';
     transcriptRef.current = '';
     setLiveTranscript('');
     setSavedAnswerMetrics(null);
@@ -626,7 +637,7 @@ export default function InterviewRoundPage() {
         console.warn('[Interview Debug] WARNING: Captured transcript is empty! Mic input may not have registered.');
       }
 
-      const userTranscript = capturedText || 'In my previous software engineering projects, I focused on system performance, modular API design, and automated testing.';
+      const userTranscript = capturedText || "I don't know the answer to this question right now.";
 
       // 1. Analyze speech metrics & vision telemetry
       const metrics = analyzeSpeechMetrics(userTranscript, answerDuration, longPauseCount, lastSegmentConfidence);

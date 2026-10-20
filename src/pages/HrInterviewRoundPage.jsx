@@ -287,33 +287,41 @@ export default function HrInterviewRoundPage() {
   }, [cameraPermission, modelsReady, hasStartedSession, videoActive]);
 
   // Speech Recognition Init
+  const accumulatedFinalRef = useRef('');
+
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = 'en-US'; // Speech-to-Text locked to English
+      // Support Indian English and user locale for maximum speech recognition accuracy
+      const browserLang = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en-IN';
+      recognition.lang = browserLang.startsWith('en') ? browserLang : 'en-IN';
 
       recognition.onresult = (event) => {
-        let fullTranscript = '';
+        let interimText = '';
         let confSum = 0;
         let confCount = 0;
 
-        for (let i = 0; i < event.results.length; ++i) {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
           const seg = event.results[i][0];
           if (seg.confidence && seg.confidence > 0) {
             confSum += seg.confidence;
             confCount++;
           }
-          fullTranscript += seg.transcript + ' ';
+          if (event.results[i].isFinal) {
+            accumulatedFinalRef.current += seg.transcript + ' ';
+          } else {
+            interimText += seg.transcript;
+          }
         }
 
         if (confCount > 0) {
           setLastSegmentConfidence(confSum / confCount);
         }
 
-        const clean = fullTranscript.trim();
+        const clean = (accumulatedFinalRef.current + ' ' + interimText).replace(/\s+/g, ' ').trim();
         if (clean) {
           transcriptRef.current = clean;
           setLiveTranscript(clean);
@@ -466,6 +474,7 @@ export default function HrInterviewRoundPage() {
 
   const handleStartAnswer = () => {
     stopSpeech();
+    accumulatedFinalRef.current = '';
     transcriptRef.current = '';
     setIsAnswering(true);
     setLiveTranscript('');
@@ -503,7 +512,7 @@ export default function HrInterviewRoundPage() {
         console.warn('[Interview Debug: HR] WARNING: Captured transcript is empty! Mic input may not have registered.');
       }
 
-      const userTranscript = capturedText || "I focus on open communication, active listening, and aligning team priorities with project milestones.";
+      const userTranscript = capturedText || "I don't have a response to this question right now.";
       
       const updatedHistory = [
         ...conversationHistory,
