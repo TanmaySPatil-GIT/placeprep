@@ -8,7 +8,7 @@ export default function SignInPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const fromPath = location.state?.from?.pathname || '/dashboard';
-  const { currentUser, login, signup, loginWithGoogle } = useAuth();
+  const { currentUser, login, signup, loginWithGoogle, loginAsGuest } = useAuth();
 
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
@@ -23,6 +23,19 @@ export default function SignInPage() {
       navigate(fromPath, { replace: true });
     }
   }, [currentUser, navigate, fromPath]);
+
+  const handleGuestLogin = async (role = 'candidate') => {
+    setError('');
+    setSubmitting(true);
+    try {
+      await loginAsGuest(role);
+      navigate(fromPath, { replace: true });
+    } catch (err) {
+      setError('Guest mode error: ' + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -86,6 +99,37 @@ export default function SignInPage() {
         )}
 
         <div className="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-warmborder shadow-warm-lg space-y-6">
+          
+          {/* Fast-Track Demo Mode for Evaluators & Visitors */}
+          <div className="p-4 rounded-2xl bg-peach-100/70 border border-rust-500/20 space-y-2.5 shadow-warm-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold font-mono text-rust-700 uppercase tracking-wide flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-rust-500" /> Instant Demo Access
+              </span>
+              <span className="text-[10px] text-warmtext-500 font-medium">1-Click Evaluation</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleGuestLogin('candidate')}
+                disabled={submitting}
+                className="py-2.5 px-3 rounded-xl bg-rust-500 hover:bg-rust-600 text-white font-extrabold text-xs shadow-glow-rust transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Candidate Demo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGuestLogin('mentor')}
+                disabled={submitting}
+                className="py-2.5 px-3 rounded-xl bg-white hover:bg-peach-50 text-warmtext-900 font-bold text-xs border border-warmborder shadow-warm-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-dustyrose-500" />
+                <span>Mentor Demo</span>
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={handleGoogleAuth}
             disabled={submitting}

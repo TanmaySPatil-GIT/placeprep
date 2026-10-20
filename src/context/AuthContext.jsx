@@ -66,6 +66,51 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function loginAsGuest(role = 'candidate') {
+    const isMentor = role === 'mentor';
+    const guestUser = {
+      uid: isMentor ? 'guest_mentor_demo' : 'guest_candidate_demo',
+      email: isMentor ? 'mentor.demo@placeprep.ai' : 'demo.candidate@placeprep.ai',
+      displayName: isMentor ? 'Prof. Rajiv Sharma (Placement Officer)' : 'Demo Candidate',
+      isAnonymous: true
+    };
+    const guestProfile = {
+      uid: guestUser.uid,
+      email: guestUser.email,
+      name: guestUser.displayName,
+      targetField: 'Software Development',
+      role: isMentor ? 'mentor' : 'student',
+      readyScore: 82,
+      createdAt: new Date().toISOString()
+    };
+    setCurrentUser(guestUser);
+    setUserProfile(guestProfile);
+    try {
+      localStorage.setItem('placeprep_guest_user', JSON.stringify({ guestUser, guestProfile }));
+    } catch (e) {}
+    return guestUser;
+  }
+
+  function toggleRole() {
+    setUserProfile(prev => {
+      const newRole = prev?.role === 'mentor' ? 'student' : 'mentor';
+      const updated = {
+        ...prev,
+        role: newRole,
+        name: newRole === 'mentor' ? 'Prof. Rajiv Sharma (Placement Officer)' : (prev?.name?.includes('Sharma') ? 'Demo Candidate' : prev?.name || 'Demo Candidate')
+      };
+      try {
+        const saved = localStorage.getItem('placeprep_guest_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          parsed.guestProfile = updated;
+          localStorage.setItem('placeprep_guest_user', JSON.stringify(parsed));
+        }
+      } catch (e) {}
+      return updated;
+    });
+  }
+
   async function signup(email, password, name, targetField) {
     const res = await createUserWithEmailAndPassword(auth, email, password);
     await fetchOrCreateUserProfile(res.user, { name, targetField });
@@ -86,19 +131,37 @@ export function AuthProvider({ children }) {
   }
 
   async function logout() {
+    try {
+      localStorage.removeItem('placeprep_guest_user');
+    } catch (e) {}
+    setCurrentUser(null);
     setUserProfile(null);
-    return signOut(auth);
+    try {
+      await signOut(auth);
+    } catch (e) {}
   }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
       if (user) {
+        setCurrentUser(user);
         await fetchOrCreateUserProfile(user);
+        setLoading(false);
       } else {
+        try {
+          const savedGuest = localStorage.getItem('placeprep_guest_user');
+          if (savedGuest) {
+            const parsed = JSON.parse(savedGuest);
+            setCurrentUser(parsed.guestUser);
+            setUserProfile(parsed.guestProfile);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {}
+        setCurrentUser(null);
         setUserProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return unsubscribe;
@@ -111,6 +174,8 @@ export function AuthProvider({ children }) {
     signup,
     login,
     loginWithGoogle,
+    loginAsGuest,
+    toggleRole,
     logout,
     fetchOrCreateUserProfile
   };

@@ -100,11 +100,11 @@ export function analyzeSpeechMetrics(transcriptText = '', durationSeconds = 1, l
 export function calculateAggregateCommunicationScore(answers = []) {
   if (!answers || answers.length === 0) {
     return {
-      communicationScore: 85,
-      avgWpm: 135,
-      totalFillers: 2,
-      totalPauses: 1,
-      avgClarityProxy: 92,
+      communicationScore: null,
+      avgWpm: 0,
+      totalFillers: 0,
+      totalPauses: 0,
+      avgClarityProxy: 0,
       breakdown: []
     };
   }

@@ -34,26 +34,29 @@ const PageFallback = () => (
   </div>
 );
 
-// Root route component: if unauthenticated on initial visit, direct user to /signin
-function RootRoute() {
-  const { currentUser, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6">
-        <div className="w-12 h-12 rounded-2xl bg-rust-500 text-white flex items-center justify-center shadow-glow-rust animate-pulse">
-          <Loader2 className="w-6 h-6 animate-spin" />
-        </div>
-        <p className="text-xs font-mono font-bold text-warmtext-700">Checking Authentication Session...</p>
+function NotFoundPage() {
+  return (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8 bg-peach-50 rounded-3xl border border-warmborder shadow-warm-md space-y-5 max-w-lg mx-auto my-8 animate-fade-in">
+      <div className="w-16 h-16 rounded-2xl bg-rust-100 border border-warmborder flex items-center justify-center text-rust-500 shadow-warm-sm">
+        <Loader2 className="w-8 h-8 text-rust-500 animate-spin" />
       </div>
-    );
-  }
-
-  if (!currentUser) {
-    return <Navigate to="/signin" replace />;
-  }
-
-  return <LandingPage />;
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-mono font-extrabold uppercase tracking-wider text-rust-600 bg-rust-100 px-3 py-1 rounded-full">Error 404</span>
+        <h2 className="text-2xl sm:text-3xl font-extrabold font-heading text-warmtext-900">Module Not Found</h2>
+        <p className="text-xs text-warmtext-600 max-w-sm">
+          The requested round or page doesn't exist. Select a valid placement round from your dashboard or return home.
+        </p>
+      </div>
+      <div className="flex items-center gap-3 pt-2">
+        <a href="/dashboard" className="px-5 py-2.5 rounded-full bg-rust-500 hover:bg-rust-600 text-white font-bold text-xs shadow-glow-rust transition-all">
+          Go to Dashboard
+        </a>
+        <a href="/" className="px-5 py-2.5 rounded-full bg-white hover:bg-peach-100 text-warmtext-900 font-bold text-xs border border-warmborder shadow-warm-sm transition-all">
+          Return Home
+        </a>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -65,8 +68,8 @@ export default function App() {
             <Suspense fallback={<PageFallback />}>
               <Routes>
                 <Route path="/" element={<Layout />}>
-                  {/* Root Route: Redirects to /signin if unauthenticated */}
-                  <Route index element={<RootRoute />} />
+                  {/* Public Landing & Auth Routes */}
+                  <Route index element={<LandingPage />} />
                   <Route path="signin" element={<SignInPage />} />
 
                   {/* Protected Functional Routes */}
@@ -84,8 +87,20 @@ export default function App() {
                   <Route path="round/negotiation" element={<ProtectedRoute><NegotiationRoundPage /></ProtectedRoute>} />
                   <Route path="results" element={<ProtectedRoute><ResultsPage /></ProtectedRoute>} />
                   <Route path="final-report" element={<ProtectedRoute><FinalReportPage /></ProtectedRoute>} />
+                  <Route path="report" element={<Navigate to="/final-report" replace />} />
                   <Route path="recommendations" element={<ProtectedRoute><RecommendationsPage /></ProtectedRoute>} />
                   <Route path="mentor-dashboard" element={<ProtectedRoute><MentorDashboardPage /></ProtectedRoute>} />
+
+                  {/* Backward-Compatible Route Aliases */}
+                  <Route path="aptitude-round" element={<Navigate to="/round/aptitude" replace />} />
+                  <Route path="technical-mcq-round" element={<Navigate to="/round/tech-mcq" replace />} />
+                  <Route path="dsa-round" element={<Navigate to="/round/dsa" replace />} />
+                  <Route path="system-design-round" element={<Navigate to="/round/system-design" replace />} />
+                  <Route path="interview-round" element={<Navigate to="/round/interview" replace />} />
+                  <Route path="hr-interview-round" element={<Navigate to="/round/hr-interview" replace />} />
+
+                  {/* Catch-All 404 Route */}
+                  <Route path="*" element={<NotFoundPage />} />
                 </Route>
               </Routes>
             </Suspense>

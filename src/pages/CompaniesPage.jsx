@@ -101,7 +101,7 @@ export default function CompaniesPage() {
 
   const handleCompanySelect = (company) => {
     selectCompany(company);
-    navigate('/round/aptitude');
+    navigate('/resume');
   };
 
   const categories = ['All', 'FAANG / MAMAA', 'Product & Enterprise', 'Finance & FinTech', 'IT Services & Consulting'];

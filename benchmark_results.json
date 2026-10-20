@@ -1,0 +1,446 @@
+{
+  "benchmark_timestamp": "2026-10-12T09:59:14.805673",
+  "total_cases": 10,
+  "all_schemas_valid": true,
+  "results": [
+    {
+      "caseId": 1,
+      "name": "correct_answer",
+      "description": "Student gives accurate, nuanced answer for OOP inheritance with composition contrast",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_1",
+        "currentTopicId": "oop-inheritance",
+        "lastQuestionAsked": "Explain the concept of Inheritance in OOP and why composition is often preferred over inheritance.",
+        "studentAnswer": "Inheritance establishes an is-a relationship where a subclass inherits methods and fields from a parent superclass for code reuse and runtime polymorphism via method overriding. Composition uses a has-a relationship and is often preferred to prevent tight coupling and avoid the fragile base class problem.",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "medium"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [
+          "Inheritance allows a subclass to derive attributes and methods from a superclass to enable code reuse",
+          "Establishes a strict 'is-a' subtype relationship between parent and child classes",
+          "Supports runtime polymorphism via method overriding (subclass re-implementing superclass methods)",
+          "Composition ('has-a') is often preferred over inheritance to avoid tight coupling and the fragile base class problem"
+        ],
+        "conceptsMissing": [],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "high",
+        "degraded": false,
+        "evidenceQuote": "Inheritance establishes an is-a relationship where a subclass inherits methods and fields from a parent superclass for code reuse and runtime polymorphism via method overriding. Composition uses a has-a relationship and is often preferred to prevent tight coupling and avoid the fragile base class problem.",
+        "fallbackUsed": false,
+        "followUpWorthy": false,
+        "modelUsed": "gemini-3.1-flash-lite",
+        "reason": "The candidate correctly identified all key concepts defined in the rubric, including the 'is-a'/'has-a' relationship distinction, the role of method overriding, and the rationale for favoring composition.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "correct"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true,
+      "evidence_quote_present": true
+    },
+    {
+      "caseId": 2,
+      "name": "incorrect_answer",
+      "description": "Student confuses overriding with overloading and thinks private fields are accessible",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_2",
+        "currentTopicId": "oop-inheritance",
+        "lastQuestionAsked": "Explain how method overriding works and how private fields of a parent are accessed in subclasses.",
+        "studentAnswer": "Method overriding is when you write multiple methods in the same class with the same name but different arguments at compile time. Also, private members of a parent class are completely accessible directly by any child class without getters.",
+        "sessionState": {
+          "currentDepth": 1,
+          "difficultyLevel": "medium"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [
+          "Inheritance allows a subclass to derive attributes and methods from a superclass to enable code reuse",
+          "Establishes a strict \"is-a\" subtype relationship between parent and child classes",
+          "Supports runtime polymorphism via method overriding (subclass re-implementing superclass methods)",
+          "Composition (\"has-a\") is often preferred over inheritance to avoid tight coupling and the fragile base class problem"
+        ],
+        "conceptsWrong": [
+          "Confusing method overriding (same signature, runtime) with method overloading (different signature, compile-time)",
+          "Thinking private members of a parent class are directly accessible in child classes"
+        ],
+        "confidenceOfStudent": "high",
+        "degraded": false,
+        "evidenceQuote": "Method overriding is when you write multiple methods in the same class with the same name but different arguments at compile time. Also, private members of a parent class are completely accessible directly by any child class without getters.",
+        "fallbackUsed": false,
+        "followUpWorthy": true,
+        "modelUsed": "gemini-3.1-flash-lite",
+        "reason": "The candidate incorrectly defined overriding as overloading and stated the false misconception that private fields are directly accessible to subclasses.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "incorrect"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true,
+      "misconceptions_flagged": true
+    },
+    {
+      "caseId": 3,
+      "name": "vague_answer",
+      "description": "Student provides hand-wavy response without technical B+Tree concepts",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_3",
+        "currentTopicId": "dbms-indexing-b-trees",
+        "lastQuestionAsked": "How do B+Tree database indexes optimize search performance compared to full table scans?",
+        "studentAnswer": "Well, indexes basically optimize things in the database so queries run faster and take less time because of the structure and stuff in memory.",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "medium"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [
+          "Database indexes use B-Tree / B+Tree structures to reduce search time complexity from O(N) to O(log N)",
+          "Clustered Index determines physical storage order of data rows on disk (only 1 per table)",
+          "Non-Clustered Index maintains a separate structure pointing back to data row pointers",
+          "Composite indexes require adherence to Leftmost Prefix Rule",
+          "Indexing accelerates READ queries but adds overhead to INSERT, UPDATE, and DELETE operations"
+        ],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "low",
+        "degraded": false,
+        "evidenceQuote": "Well, indexes basically optimize things in the database so queries run faster and take less time because of the structure and stuff in memory.",
+        "fallbackUsed": false,
+        "followUpWorthy": true,
+        "modelUsed": "gemini-3.1-flash-lite",
+        "reason": "The answer fails to mention the B-Tree data structure, the specific complexity reduction from O(N) to O(log N), or any of the structural characteristics required by the rubric.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "vague"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true,
+      "concepts_missing_flagged": true
+    },
+    {
+      "caseId": 4,
+      "name": "contradiction_answer",
+      "description": "Student asserts database provides both C and A during partition, then contradicts itself",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_4",
+        "currentTopicId": "sysdesign-cap-theorem",
+        "lastQuestionAsked": "In distributed system architecture, can a database provide both Consistency and Availability during network partitions?",
+        "studentAnswer": "Yes, you can easily guarantee both complete consistency and 100% availability during network partitions by using multi-master replication, but when a network partition happens, you cannot guarantee availability if you choose consistency.",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "hard"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [
+          "Partition Tolerance (P) is mandatory in distributed networks",
+          "CP Systems vs AP Systems",
+          "PACELC Theorem"
+        ],
+        "conceptsWrong": [
+          "Believing a database can pick C and A and completely drop P in a distributed network"
+        ],
+        "confidenceOfStudent": "high",
+        "degraded": false,
+        "evidenceQuote": "Yes, you can easily guarantee both complete consistency and 100% availability during network partitions by using multi-master replication",
+        "fallbackUsed": false,
+        "followUpWorthy": true,
+        "modelUsed": "gemini-3.1-flash-lite",
+        "reason": "The student fundamentally violates the CAP theorem by suggesting C and A can be achieved during a network partition, failing to recognize that Partition Tolerance (P) is mandatory in distributed systems.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "incorrect"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true
+    },
+    {
+      "caseId": 5,
+      "name": "dont_know_answer",
+      "description": "Student explicitly admits not knowing the concept",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_5",
+        "currentTopicId": "qa-selenium-pom",
+        "lastQuestionAsked": "Explain how the Page Object Model architecture decouples test assertions from web element locators.",
+        "studentAnswer": "I don't know, I haven't worked with Selenium or Page Object Models yet.",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "medium"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [
+          "Page Object Model (POM) creates an object repository for web page UI elements",
+          "Separates UI element locators from test assertions",
+          "Explicit Waits are preferred over Thread.sleep()",
+          "Data-Driven Testing framework"
+        ],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "low",
+        "evidenceQuote": "I don't know, I haven't worked with Selenium or Page Object Models yet.",
+        "followUpWorthy": true,
+        "modelUsed": "deterministic-precheck",
+        "reason": "Candidate explicitly indicated lack of knowledge or uncertainty on QA - Test Automation Frameworks & Page Object Model.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "dont_know"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true,
+      "evidence_quote_matches": true
+    },
+    {
+      "caseId": 6,
+      "name": "resume_based_claim",
+      "description": "Candidate gives objective STAR response citing data, benchmarks, and constructive resolution",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_6",
+        "currentTopicId": "behavioral-handling-conflict",
+        "lastQuestionAsked": "Describe a time when you strongly disagreed with a teammate or lead on a technical approach.",
+        "studentAnswer": "During my final year project, our lead advocated using SQLite while I advocated PostgreSQL. I benchmarked our concurrent write requirements with realistic simulated user load and showed that SQLite locked under concurrent writes. We reviewed the metrics as a team, adopted PostgreSQL, and deployed with zero database concurrency errors.",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "medium",
+          "roundType": "hr"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [
+          "Focusing on objective data, benchmarks, and customer impact",
+          "STAR method structure"
+        ],
+        "conceptsMissing": [
+          "Actively listening to peer perspectives",
+          "Disagree and Commit principle",
+          "De-escalating tension through 1-on-1 dialogue or PoCs"
+        ],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "high",
+        "degraded": false,
+        "evidenceQuote": "I benchmarked our concurrent write requirements with realistic simulated user load and showed that SQLite locked under concurrent writes.",
+        "fallbackUsed": false,
+        "followUpWorthy": true,
+        "modelUsed": "gemini-3.5-flash-lite",
+        "reason": "The candidate successfully used data/benchmarks and followed a STAR-like structure, but omitted key elements such as active listening, handling tension, or discussing the 'disagree and commit' philosophy.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "partially_correct"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": false
+    },
+    {
+      "caseId": 7,
+      "name": "empty_blank_transcript",
+      "description": "Empty transcript handled safely without throwing or fabricating evidence",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_7",
+        "currentTopicId": "oop-polymorphism",
+        "lastQuestionAsked": "What is runtime polymorphism in object-oriented design?",
+        "studentAnswer": "   ",
+        "sessionState": {
+          "currentDepth": 0,
+          "difficultyLevel": "medium"
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [
+          "Polymorphism allows objects of different classes to be treated as objects of a common superclass or interface",
+          "Compile-time (static) polymorphism is achieved via method overloading and operator overloading",
+          "Runtime (dynamic) polymorphism is achieved via method overriding using virtual methods or dynamic dispatch",
+          "Interfaces and abstract classes define dynamic contracts without tying callers to concrete implementations"
+        ],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "low",
+        "evidenceQuote": "",
+        "followUpWorthy": true,
+        "modelUsed": "deterministic-precheck",
+        "reason": "Candidate response was empty or too brief to evaluate against reference rubric concepts.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "uncertainty": "low",
+        "verdict": "vague"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_pass": true,
+      "no_error_thrown": true
+    },
+    {
+      "caseId": 8,
+      "name": "simulated_api_timeout",
+      "description": "Simulated AI timeout must return evaluation_unavailable, null score, and marked degraded",
+      "endpoint": "/api/evaluate-answer",
+      "payload": {
+        "sessionId": "bench_case_8",
+        "currentTopicId": "invalid_topic_xyz",
+        "lastQuestionAsked": "Some question",
+        "studentAnswer": "Some answer",
+        "rubric": {
+          "topicName": "Mock Failing",
+          "keyConcepts": [],
+          "commonMisconceptions": []
+        },
+        "sessionState": {}
+      },
+      "status_code": 200,
+      "response": {
+        "conceptsCorrect": [],
+        "conceptsMissing": [],
+        "conceptsWrong": [],
+        "confidenceOfStudent": "medium",
+        "degraded": true,
+        "degradedReason": "Evaluator AI call failed validation or timed out (Gemini returned empty response); turn excluded from scoring.",
+        "evidenceQuote": null,
+        "fallbackUsed": true,
+        "followUpWorthy": false,
+        "modelUsed": "degraded-fallback",
+        "passed": null,
+        "reason": "Evaluation unavailable: Gemini returned empty response; excluded from scoring.",
+        "rubricVersion": "v1.0-interviewRubrics",
+        "score": null,
+        "uncertainty": "high",
+        "verdict": "evaluation_unavailable"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid evaluator schema",
+      "verdict_is_unavailable": true,
+      "score_is_null": true,
+      "degraded_flag_true": true,
+      "fallback_used_true": true
+    },
+    {
+      "caseId": 9,
+      "name": "probe_cap_enforcement",
+      "description": "When probeCount hits hard cap (2), Decision Engine forces CLOSE_TOPIC / ADVANCE",
+      "decision_engine_output": {
+        "strategy": "move_to_next_topic",
+        "topicAdvance": true,
+        "newDifficultyLevel": null,
+        "decisionState": "CLOSE_TOPIC",
+        "capped": true,
+        "probeCount": 2,
+        "reason": "Hard probe cap reached (2/2 follow-ups). Moving to next topic."
+      },
+      "decision_is_close_topic": true,
+      "topic_advance_forced": true,
+      "endpoint": "/api/generate-question",
+      "payload": {
+        "sessionId": "bench_case_9",
+        "strategy": "move_to_next_topic",
+        "evaluatorOutput": {
+          "verdict": "partially_correct"
+        },
+        "currentTopicId": "oop-polymorphism",
+        "sessionState": {
+          "sessionId": "bench_case_9",
+          "currentTopicId": "oop-inheritance",
+          "probeCount": 2,
+          "currentDepth": 2,
+          "difficultyLevel": "medium",
+          "topicPlan": [
+            {
+              "topicId": "oop-inheritance",
+              "topicName": "OOP - Inheritance",
+              "status": "in_progress",
+              "probeCount": 2
+            },
+            {
+              "topicId": "oop-polymorphism",
+              "topicName": "OOP - Polymorphism",
+              "status": "not_started",
+              "probeCount": 0
+            }
+          ]
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "competency": "OOP - Polymorphism",
+        "decision": "CLOSE_TOPIC",
+        "degraded": false,
+        "evidence_to_probe": "Application of polymorphic design patterns in real-world software architecture.",
+        "fallbackQuestion": false,
+        "fallbackUsed": false,
+        "interviewerResponse": "Since we've covered the basics, how would you use polymorphism to design a system that handles different payment methods like credit cards and PayPal through a unified interface?",
+        "isFallback": false,
+        "probe_type": "concept_gap",
+        "question": "Since we've covered the basics, how would you use polymorphism to design a system that handles different payment methods like credit cards and PayPal through a unified interface?"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid generator schema"
+    },
+    {
+      "caseId": 10,
+      "name": "duplicate_question_prevention",
+      "description": "Generator rejects candidate if matching previously asked questions and returns fresh question",
+      "endpoint": "/api/generate-question",
+      "payload": {
+        "sessionId": "bench_case_10",
+        "strategy": "probe_missing_nuance",
+        "evaluatorOutput": {
+          "verdict": "correct",
+          "conceptsMissing": [
+            "composition"
+          ]
+        },
+        "currentTopicId": "oop-inheritance",
+        "askedQuestionHashes": [
+          "qh_8ff6bad9"
+        ],
+        "sessionState": {
+          "currentTopicId": "oop-inheritance",
+          "askedQuestions": [
+            "Explain the concept of Inheritance in OOP, contrast it with Composition, and describe a scenario where inheriting from a class would be an anti-pattern."
+          ],
+          "askedQuestionHashes": [
+            "qh_8ff6bad9"
+          ]
+        }
+      },
+      "status_code": 200,
+      "response": {
+        "competency": "OOP - Inheritance",
+        "decision": "PROBE",
+        "degraded": false,
+        "evidence_to_probe": "composition",
+        "fallbackQuestion": false,
+        "fallbackUsed": false,
+        "interviewerResponse": "While inheritance handles the 'is-a' relationship well, could you walk me through a specific scenario where using composition instead would lead to a more flexible or maintainable design?",
+        "isFallback": false,
+        "probe_type": "concept_gap",
+        "question": "While inheritance handles the 'is-a' relationship well, could you walk me through a specific scenario where using composition instead would lead to a more flexible or maintainable design?"
+      },
+      "schema_valid": true,
+      "schema_message": "Valid generator schema",
+      "duplicate_prevented": true,
+      "single_question_confirmed": true
+    }
+  ]
+}

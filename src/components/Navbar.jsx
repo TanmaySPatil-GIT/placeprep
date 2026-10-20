@@ -24,7 +24,7 @@ import {
 import Logo from './Logo';
 
 export default function Navbar() {
-  const { currentUser, userProfile, logout } = useAuth();
+  const { currentUser, userProfile, logout, toggleRole } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -330,9 +330,21 @@ export default function Navbar() {
                       <div 
                         className="absolute right-0 mt-2 w-56 rounded-2xl bg-white/95 backdrop-blur-xl border border-warmborder shadow-warm-lg p-2 space-y-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200"
                       >
-                        <div className="px-3 py-2 border-b border-warmborder/60">
-                          <p className="text-xs font-bold text-warmtext-900 font-heading">{userProfile?.name || 'Candidate'}</p>
-                          <p className="text-[10px] text-warmtext-500 truncate">{userProfile?.email || 'candidate@placeprep.ai'}</p>
+                        <div className="px-3 py-2 border-b border-warmborder/60 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-warmtext-900 font-heading truncate">{userProfile?.name || 'Candidate'}</p>
+                            <p className="text-[10px] text-warmtext-500 truncate">{userProfile?.email || 'candidate@placeprep.ai'}</p>
+                          </div>
+                          {toggleRole && (
+                            <button
+                              type="button"
+                              onClick={toggleRole}
+                              className="shrink-0 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rust-100 text-rust-700 border border-rust-200 hover:bg-rust-200 transition-colors cursor-pointer"
+                              title="Toggle between Candidate and Mentor role"
+                            >
+                              {isMentor ? '🎓 Mentor' : '👤 Student'}
+                            </button>
+                          )}
                         </div>
 
                         <Link
@@ -342,6 +354,15 @@ export default function Navbar() {
                         >
                           <LayoutDashboard className="w-4 h-4 text-rust-500" />
                           <span>Candidate Dashboard</span>
+                        </Link>
+
+                        <Link
+                          to="/mentor-dashboard"
+                          onClick={() => setProfileDropdownOpen(false)}
+                          className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-warmtext-700 hover:bg-rust-50 hover:text-rust-600 transition-colors"
+                        >
+                          <School className="w-4 h-4 text-dustyrose-500" />
+                          <span>Mentor / Dean Portal</span>
                         </Link>
 
                         <Link

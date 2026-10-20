@@ -48,7 +48,7 @@ const saveRecentQuestionIds = (newQIds) => {
 
 export default function AptitudeRoundPage() {
   const navigate = useNavigate();
-  const { authUser } = useAuth();
+  const { currentUser } = useAuth();
   const { selectedCompany, selectedField, setAptitudeResult, aptitudeResult: savedAptitudeResult, difficultyLevel } = usePrep();
 
   const companyName = selectedCompany?.name || 'TCS';

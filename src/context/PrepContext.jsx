@@ -291,27 +291,63 @@ export function PrepProvider({ children }) {
     } catch (e) {}
   };
 
-  const selectField = async (fieldObj) => {
-    setSelectedField(fieldObj);
-    setCurrentRoundIndex(0);
+  const clearAllRoundResults = () => {
     setSessionResults([]);
+    setSessionStateInternal(null);
     setDsaResultState(null);
     setAptitudeResultState(null);
     setTechnicalMcqResultState(null);
     setTechnicalInterviewResultState(null);
     setHrInterviewResultState(null);
+    setNegotiationResultState(null);
     setSystemDesignResultState(null);
     setResumeQuestionsState(null);
+
+    const keysToRemove = [
+      'placeprep_session_results',
+      'placeprep_session_state',
+      'placeprep_dsa_result',
+      'placeprep_aptitude_result',
+      'placeprep_technical_mcq_result',
+      'placeprep_technical_interview_result',
+      'placeprep_hr_interview_result',
+      'placeprep_negotiation_result',
+      'placeprep_system_design_result',
+      'placeprep_resume_questions'
+    ];
+    keysToRemove.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      } catch (e) {}
+    });
+  };
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      const storedUid = localStorage.getItem('placeprep_current_uid');
+      if (user) {
+        if (storedUid && storedUid !== user.uid) {
+          // Different user logged in - clear previous user's stale session data!
+          clearAllRoundResults();
+        }
+        localStorage.setItem('placeprep_current_uid', user.uid);
+      } else {
+        // User logged out - clear round results!
+        clearAllRoundResults();
+        localStorage.removeItem('placeprep_current_uid');
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const selectField = async (fieldObj) => {
+    setSelectedField(fieldObj);
+    setCurrentRoundIndex(0);
+    clearAllRoundResults();
     try {
       localStorage.setItem('placeprep_selected_field', JSON.stringify(fieldObj));
-      localStorage.removeItem('placeprep_session_results');
-      localStorage.removeItem('placeprep_dsa_result');
-      localStorage.removeItem('placeprep_aptitude_result');
-      localStorage.removeItem('placeprep_technical_mcq_result');
-      localStorage.removeItem('placeprep_technical_interview_result');
-      localStorage.removeItem('placeprep_hr_interview_result');
-      localStorage.removeItem('placeprep_system_design_result');
-      localStorage.removeItem('placeprep_resume_questions');
       if (auth.currentUser) {
         const userRef = doc(db, 'users', auth.currentUser.uid);
         await setDoc(userRef, { selectedField: fieldObj, targetField: fieldObj.name }, { merge: true });
@@ -324,20 +360,9 @@ export function PrepProvider({ children }) {
   const selectCompany = (company) => {
     setSelectedCompany(company);
     setCurrentRoundIndex(0);
-    setSessionResults([]);
-    setDsaResultState(null);
-    setAptitudeResultState(null);
-    setTechnicalMcqResultState(null);
-    setTechnicalInterviewResultState(null);
-    setHrInterviewResultState(null);
+    clearAllRoundResults();
     try {
       localStorage.setItem('placeprep_selected_company', JSON.stringify(company));
-      localStorage.removeItem('placeprep_session_results');
-      localStorage.removeItem('placeprep_dsa_result');
-      localStorage.removeItem('placeprep_aptitude_result');
-      localStorage.removeItem('placeprep_technical_mcq_result');
-      localStorage.removeItem('placeprep_technical_interview_result');
-      localStorage.removeItem('placeprep_hr_interview_result');
     } catch (e) {
       console.warn('LocalStorage error:', e);
     }

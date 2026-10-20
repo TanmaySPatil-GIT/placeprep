@@ -87,7 +87,7 @@ export default function OnboardingPage() {
     setErrorMsg('');
 
     const statusTimer = setTimeout(() => {
-      setOnboardingStatusMsg('Waking up server (Render cold start)... This may take up to a minute.');
+      setOnboardingStatusMsg('Auditing technical skills and calibrating diagnostic baseline...');
     }, 6000);
 
     const targetField = INITIAL_FIELDS.find(f => f.fieldId === targetFieldId)?.name || 'Software Development';

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { collection, addDoc, query, where, orderBy, limit, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, orderBy, limit, getDocs, getDoc, doc, updateDoc } from 'firebase/firestore';
 import { RadialBarChart, RadialBar, PolarAngleAxis, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { db, auth } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -81,6 +81,10 @@ export default function FinalReportPage() {
   // Handle read-only view passed from Dashboard report history
   const readOnlyReport = location.state?.reportData;
 
+  const [hasValidSession, setHasValidSession] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [sessionFromDb, setSessionFromDb] = useState(null);
+
   const [report, setReport] = useState(readOnlyReport || null);
   const [loading, setLoading] = useState(!readOnlyReport);
   const [isExporting, setIsExporting] = useState(false);
@@ -127,13 +131,19 @@ export default function FinalReportPage() {
     });
   };
 
-  const commScoreObj = calculateAggregateCommunicationScore(sessionResults);
-  const sessionEmotionObj = generateSessionEmotionTimeline((sessionResults || []).flatMap(r => r.telemetryLogs || []));
+  const effectiveSessionResults = (sessionResults && sessionResults.length > 0)
+    ? sessionResults
+    : (sessionFromDb?.answers || sessionFromDb?.evaluationLog || []);
 
-  const fieldName = readOnlyReport?.field || selectedField?.name || 'Software Development';
-  const companyName = readOnlyReport?.company || selectedCompany?.name || 'Google';
+  const effectiveHrAnswers = hrInterviewResult?.answers || [];
+
+  const commScoreObj = calculateAggregateCommunicationScore(effectiveSessionResults);
+  const sessionEmotionObj = generateSessionEmotionTimeline((effectiveSessionResults || []).flatMap(r => r.telemetryLogs || []));
+
+  const fieldName = readOnlyReport?.field || sessionFromDb?.selectedField || selectedField?.name || 'Software Development';
+  const companyName = readOnlyReport?.company || sessionFromDb?.selectedCompany || selectedCompany?.name || 'Google';
   const reportDate = readOnlyReport?.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const activeDifficulty = readOnlyReport?.difficultyLevel || difficultyLevel || 'Medium';
+  const activeDifficulty = readOnlyReport?.difficultyLevel || sessionFromDb?.difficultyLevel || difficultyLevel || 'Medium';
   const activeExpLevel = readOnlyReport?.experienceLevel || experienceLevel || 'Fresher';
   const activeExpYears = readOnlyReport?.experienceYears || experienceYears || '0-2';
 
@@ -185,12 +195,15 @@ export default function FinalReportPage() {
   const getWeakestThreeVoiceAnswers = () => {
     const allVoiceAnswers = [];
 
-    if (sessionResults && sessionResults.length > 0) {
-      sessionResults.forEach((ans, idx) => {
+    if (effectiveSessionResults && effectiveSessionResults.length > 0) {
+      effectiveSessionResults.forEach((ans, idx) => {
+        const transcriptText = (ans.transcript || ans.userResponse || ans.studentAnswer || '').trim();
+        if (!transcriptText) return;
+
         const isUnavailable = ans.verdict === 'evaluation_unavailable';
         const isFallback = Boolean(ans.isFallbackQuestion || ans.isFallback || ans.fallbackQuestion);
         const conf = ans.segmentConfidence || (ans.metrics?.compositeScore ? ans.metrics.compositeScore / 100 : 0.82);
-        const wordCount = (ans.transcript || '').split(' ').length;
+        const wordCount = transcriptText.split(' ').length;
         const fillerCount = ans.metrics?.fillerWordCount || 0;
         const score = isUnavailable ? null : Math.max(10, Math.round(conf * 100 - (fillerCount * 5) + (wordCount > 30 ? 10 : 0)));
         const evidenceQuote = isUnavailable ? null : (ans.evidenceQuote || ans.metrics?.evidenceQuote || null);
@@ -201,11 +214,11 @@ export default function FinalReportPage() {
         allVoiceAnswers.push({
           id: `tech-${idx}`,
           roundName: 'Stage 5: Technical AI Voice Interview',
-          questionText: ans.questionText || `Technical Question ${idx + 1}`,
-          userTranscript: ans.transcript || ans.userResponse || 'Answer submitted verbally.',
+          questionText: ans.questionText || ans.question || `Technical Question ${idx + 1}`,
+          userTranscript: transcriptText,
           score,
           interviewType: 'technical',
-          strongSampleAnswer: ans.strongSampleAnswer || null,
+          strongSampleAnswer: ans.strongSampleAnswer || ans.modelAnswer || null,
           diffExplanation: formattedDiff,
           evidenceQuote: evidenceQuote,
           uncertainty: ans.uncertainty || null,
@@ -215,8 +228,11 @@ export default function FinalReportPage() {
       });
     }
 
-    if (hrInterviewResult && hrInterviewResult.answers && hrInterviewResult.answers.length > 0) {
-      hrInterviewResult.answers.forEach((ans, idx) => {
+    if (effectiveHrAnswers && effectiveHrAnswers.length > 0) {
+      effectiveHrAnswers.forEach((ans, idx) => {
+        const transcriptText = (ans.transcript || ans.studentAnswer || '').trim();
+        if (!transcriptText) return;
+
         const isUnavailable = ans.verdict === 'evaluation_unavailable';
         const isFallback = Boolean(ans.isFallbackQuestion || ans.isFallback || ans.fallbackQuestion);
         const score = isUnavailable ? null : (ans.score || (ans.metrics?.compositeScore ? ans.metrics.compositeScore : 78));
@@ -228,11 +244,11 @@ export default function FinalReportPage() {
         allVoiceAnswers.push({
           id: `hr-${idx}`,
           roundName: 'Stage 6: HR & Culture Fit Voice Interview',
-          questionText: ans.questionText || `HR Question ${idx + 1}`,
-          userTranscript: ans.transcript || 'STAR behavioral story articulated.',
+          questionText: ans.questionText || ans.question || `HR Question ${idx + 1}`,
+          userTranscript: transcriptText,
           score,
           interviewType: 'hr',
-          strongSampleAnswer: ans.strongSampleAnswer || null,
+          strongSampleAnswer: ans.strongSampleAnswer || ans.modelAnswer || null,
           diffExplanation: formattedDiff,
           evidenceQuote: evidenceQuote,
           uncertainty: ans.uncertainty || null,
@@ -242,42 +258,7 @@ export default function FinalReportPage() {
       });
     }
 
-    if (allVoiceAnswers.length === 0) {
-      allVoiceAnswers.push(
-        {
-          id: 'demo-weak-1',
-          roundName: 'Stage 5: Technical AI Voice Interview',
-          questionText: `How do you handle database indexing and concurrency trade-offs under high request throughput at ${companyName}?`,
-          userTranscript: 'I use database indexes on primary keys and create foreign keys to speed up queries.',
-          score: 54,
-          interviewType: 'technical',
-          strongSampleAnswer: `For high-throughput workloads at ${companyName}, I implement B-tree indexing on high-cardinality query filters, use composite indexes for multi-column joins, and decouple read traffic using Redis caching and read-replicas to maintain under 20ms response latency.`,
-          diffExplanation: 'Sample answer quantifies specific latency targets (under 20ms) and specifies caching & read-replica architecture, whereas your answer covered basic primary key concepts.'
-        },
-        {
-          id: 'demo-weak-2',
-          roundName: 'Stage 6: HR & Culture Fit Interview',
-          questionText: 'Tell me about a time you disagreed with a senior team member on technical implementation.',
-          userTranscript: 'We disagreed on the framework. I explained my approach and we picked the best one.',
-          score: 62,
-          interviewType: 'hr',
-          strongSampleAnswer: 'During a major API rewrite, a senior engineer preferred REST while I advocated for GraphQL to prevent mobile over-fetching. I built a quick prototype comparing payload size and latency, presented benchmark metrics to the team, and we reached consensus on a hybrid strategy reducing payload sizes by 40%.',
-          diffExplanation: 'Sample answer strictly follows the STAR method with concrete metric outcomes (40% payload reduction), whereas your response described general discussion without stating the data-driven resolution.'
-        },
-        {
-          id: 'demo-weak-3',
-          roundName: 'Stage 5: Technical AI Voice Interview',
-          questionText: 'What steps do you take when diagnosing a memory leak in a microservice?',
-          userTranscript: 'I look at server logs and restart the service if memory usage gets too high.',
-          score: 68,
-          interviewType: 'technical',
-          strongSampleAnswer: 'I take a heap dump using profiling tools like pprof or Chrome DevTools, analyze object retention graphs to pinpoint uncollected references, isolate memory growth under stress testing, and push a hotfix with explicit garbage collection boundaries.',
-          diffExplanation: 'Sample answer names exact diagnostic profiling tools (pprof/DevTools) and root-cause analysis, whereas your response focused on temporary service restarts.'
-        }
-      );
-    }
-
-    allVoiceAnswers.sort((a, b) => a.score - b.score);
+    allVoiceAnswers.sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
     return allVoiceAnswers.slice(0, 3);
   };
 
@@ -307,27 +288,10 @@ export default function FinalReportPage() {
         });
       });
 
-      if (docs.length < 5) {
-        const benchmarks = [
-          { id: 'b1', name: 'User4829', score: 94, difficulty: 'Hard', date: 'Recent' },
-          { id: 'b2', name: 'User1930', score: 89, difficulty: 'Medium', date: 'Recent' },
-          { id: 'b3', name: 'User8821', score: 86, difficulty: 'Hard', date: 'Recent' },
-          { id: 'b4', name: 'User5512', score: 82, difficulty: 'Medium', date: 'Recent' },
-          { id: 'b5', name: 'User3041', score: 79, difficulty: 'Easy', date: 'Recent' }
-        ];
-        setLeaderboardData([...docs, ...benchmarks.slice(docs.length)]);
-      } else {
-        setLeaderboardData(docs);
-      }
+      setLeaderboardData(docs);
     } catch (err) {
       console.warn('Leaderboard fetch notice:', err.message);
-      setLeaderboardData([
-        { id: 'b1', name: 'User4829', score: 94, difficulty: 'Hard', date: 'Recent' },
-        { id: 'b2', name: 'User1930', score: 89, difficulty: 'Medium', date: 'Recent' },
-        { id: 'b3', name: 'User8821', score: 86, difficulty: 'Hard', date: 'Recent' },
-        { id: 'b4', name: 'User5512', score: 82, difficulty: 'Medium', date: 'Recent' },
-        { id: 'b5', name: 'User3041', score: 79, difficulty: 'Easy', date: 'Recent' }
-      ]);
+      setLeaderboardData([]);
     }
   };
 
@@ -361,22 +325,158 @@ export default function FinalReportPage() {
 
   const [reportError, setReportError] = useState(null);
 
-  // Generate Report via Flask API if not read-only
+  // Validate whether a real, completed interview session exists for the current user
   useEffect(() => {
-    if (readOnlyReport) return;
+    let isMounted = true;
+
+    const validateSession = async () => {
+      setCheckingSession(true);
+
+      const searchParams = new URLSearchParams(location.search);
+      const querySessionId = searchParams.get('sessionId');
+      const stateSessionId = location.state?.sessionId;
+      const contextSessionId = sessionState?.sessionId;
+      const targetSessionId = querySessionId || stateSessionId || contextSessionId || null;
+      const currentUserId = currentUser?.uid || auth.currentUser?.uid || null;
+
+      // Step 6: Log the sessionId and user ID being used to fetch the report
+      console.log('[FinalReportPage] Validating report session:', {
+        sessionId: targetSessionId,
+        userId: currentUserId,
+        hasReadOnlyReport: Boolean(readOnlyReport),
+        sessionResultsCount: sessionResults?.length || 0,
+        hrAnswersCount: hrInterviewResult?.answers?.length || 0
+      });
+
+      if (!currentUserId) {
+        if (isMounted) {
+          setHasValidSession(false);
+          setCheckingSession(false);
+          setLoading(false);
+        }
+        return;
+      }
+
+      // 1. Check read-only report passed from Dashboard history
+      if (readOnlyReport) {
+        const belongsToUser = !readOnlyReport.userId || readOnlyReport.userId === currentUserId;
+        const hasScore = typeof readOnlyReport.readinessScore === 'number' || typeof readOnlyReport.overallInterviewScore === 'number';
+        const hasRounds = Array.isArray(readOnlyReport.roundBreakdown) && readOnlyReport.roundBreakdown.length > 0;
+
+        if (belongsToUser && (hasScore || hasRounds)) {
+          if (isMounted) {
+            setReport(readOnlyReport);
+            setHasValidSession(true);
+            setCheckingSession(false);
+            setLoading(false);
+          }
+          return;
+        }
+      }
+
+      // 2. Check in-memory context strictly for current user (user just completed interview round)
+      const isContextOwnedByCurrentUser = !sessionState?.userId || sessionState.userId === currentUserId;
+      const hasVoiceAnswers = isContextOwnedByCurrentUser && (sessionResults || []).some(r => 
+        (r.transcript || r.userResponse || '').trim().length > 0
+      );
+      const hasHrAnswers = isContextOwnedByCurrentUser && (hrInterviewResult?.answers || []).some(a => 
+        (a.transcript || '').trim().length > 0
+      );
+      const hasEvalLog = isContextOwnedByCurrentUser && (sessionState?.evaluationLog || []).some(e => 
+        (e.transcript || e.studentAnswer || '').trim().length > 0
+      );
+
+      if (hasVoiceAnswers || hasHrAnswers || hasEvalLog) {
+        if (isMounted) {
+          setHasValidSession(true);
+          setCheckingSession(false);
+        }
+        return;
+      }
+
+      // 3. Check Firestore strictly for current user's completed interview session
+      try {
+        let matchedSession = null;
+
+        if (targetSessionId) {
+          const docRef = doc(db, 'interviewSessions', targetSessionId);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            const isCompleted = data.status === 'completed' || data.state?.status === 'completed' || data.completed === true;
+            const turns = data.evaluationLog || data.recentTurns || data.answers || [];
+            const hasTranscript = turns.some(t => (t.transcript || t.studentAnswer || t.userResponse || t.text || '').trim().length > 0);
+            if (data.userId === currentUserId && isCompleted && hasTranscript) {
+              matchedSession = { id: snap.id, ...data };
+            }
+          }
+        }
+
+        if (!matchedSession) {
+          const q = query(
+            collection(db, 'interviewSessions'),
+            where('userId', '==', currentUserId)
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const validSessions = snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(s => {
+                const isCompleted = s.status === 'completed' || s.state?.status === 'completed' || s.completed === true;
+                if (!isCompleted) return false;
+                const turns = s.evaluationLog || s.recentTurns || s.answers || [];
+                return turns.some(t => (t.transcript || t.studentAnswer || t.userResponse || t.text || '').trim().length > 0);
+              })
+              .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+            if (validSessions.length > 0) {
+              matchedSession = validSessions[0];
+            }
+          }
+        }
+
+        if (matchedSession) {
+          if (isMounted) {
+            setSessionFromDb(matchedSession);
+            setHasValidSession(true);
+            setCheckingSession(false);
+          }
+          return;
+        }
+
+      } catch (err) {
+        console.warn('[FinalReportPage] Error checking Firestore session:', err.message);
+      }
+
+      if (isMounted) {
+        setHasValidSession(false);
+        setCheckingSession(false);
+        setLoading(false);
+      }
+    };
+
+    validateSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, location.search, location.state, readOnlyReport, sessionResults, hrInterviewResult, sessionState]);
+
+  // Generate Report via Flask API only if a valid session exists and report is not yet loaded
+  useEffect(() => {
+    if (checkingSession || !hasValidSession || report) return;
 
     const generateReport = async () => {
-      console.log('[FinalReportPage] [setState START] setLoading(true)');
       setLoading(true);
       setReportError(null);
-      console.log('[FinalReportPage] [setState COMPLETE] loading=true');
 
+      const effectiveState = sessionFromDb || sessionState || null;
       const FLASK_URL = `${getBackendUrl()}/api/generate-final-report`;
 
       const payload = {
         userProfile: userProfile || { displayName: currentUser?.email || 'Candidate' },
-        selectedField: selectedField || { name: 'Software Development' },
-        selectedCompany: selectedCompany || { name: 'Google' },
+        selectedField: sessionFromDb?.selectedField ? { name: sessionFromDb.selectedField } : (selectedField || { name: 'Software Development' }),
+        selectedCompany: sessionFromDb?.selectedCompany ? { name: sessionFromDb.selectedCompany } : (selectedCompany || { name: 'Google' }),
         difficultyLevel: activeDifficulty,
         experienceLevel: activeExpLevel,
         experienceYears: activeExpYears,
@@ -385,10 +485,10 @@ export default function FinalReportPage() {
         technicalMcqResults: technicalMcqResult,
         dsaOrTechnicalResults: dsaResult,
         systemDesignResults: systemDesignResult,
-        sessionState: sessionState || null,
-        interviewResults: sessionResults && sessionResults.length > 0 ? {
-          overallConfidence: Math.round(sessionResults.reduce((acc, r) => acc + (r.score || 0), 0) / sessionResults.length),
-          answersCount: sessionResults.length
+        sessionState: effectiveState,
+        interviewResults: effectiveSessionResults.length > 0 ? {
+          overallConfidence: Math.round(effectiveSessionResults.reduce((acc, r) => acc + (r.score || 0), 0) / effectiveSessionResults.length),
+          answersCount: effectiveSessionResults.length
         } : null,
         hrResults: hrInterviewResult
       };
@@ -397,7 +497,7 @@ export default function FinalReportPage() {
       const fetchTimeout = setTimeout(() => controller.abort(), 15000);
 
       try {
-        console.log('[FinalReportPage] [API: /api/generate-final-report CALLING] Payload:', payload);
+        console.log('[FinalReportPage] Calling /api/generate-final-report with payload:', payload);
         const response = await fetch(FLASK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -408,13 +508,10 @@ export default function FinalReportPage() {
 
         if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
         const generated = await response.json();
-        console.log('[FinalReportPage] [API: /api/generate-final-report RESOLVED 200] Data:', generated);
 
-        console.log('[FinalReportPage] [setState START] setReport(generated)');
         setReport(generated);
-        console.log('[FinalReportPage] [setState COMPLETE] report state updated with AI evaluation');
 
-        // Save report to Firestore in background (non-blocking for UI)
+        // Save report to Firestore in background
         if (auth.currentUser) {
           addDoc(collection(db, 'reports'), {
             userId: auth.currentUser.uid,
@@ -449,10 +546,10 @@ export default function FinalReportPage() {
         console.warn('[FinalReportPage] Final report API notice/error:', err.message);
         
         // Dynamically compute authentic scores from actual context data using deterministic formula
-        const localAgg = aggregateInterviewReport(sessionState, {
+        const localAgg = aggregateInterviewReport(effectiveState, {
           dsaResult,
           technicalMcqResult,
-          sessionResults
+          sessionResults: effectiveSessionResults
         });
 
         const roundBreakdown = [];
@@ -513,7 +610,7 @@ export default function FinalReportPage() {
         const fallback = {
           readinessScore: computedScore,
           overallInterviewScore: computedScore,
-          readinessLabel: computedScore >= 75 ? "Placement Ready Candidate" : computedScore > 0 ? "Developing Candidate" : "Diagnostic Incomplete — No Practice Rounds Recorded",
+          readinessLabel: computedScore >= 75 ? "Placement Ready Candidate" : computedScore > 0 ? "Developing Candidate" : "Diagnostic Incomplete",
           scoringFormulaName: localAgg.scoringFormulaName || "Deterministic Placement Readiness Formula",
           scoringFormulaVersion: localAgg.scoringFormulaVersion || "v1.0-scoring",
           dimensionScores: localAgg.dimensionScores || null,
@@ -524,36 +621,123 @@ export default function FinalReportPage() {
           fallbackQuestionsCount: localAgg.fallbackQuestionsCount || 0,
           degradedEvaluationsNotice: localAgg.degradedEvaluationsNotice || null,
           fallbackQuestionsNotice: localAgg.fallbackQuestionsNotice || null,
-          executiveSummary: computedScore > 0 
-            ? `Candidate completed selection round(s) for ${companyName} (${fieldName}) achieving a deterministic readiness score of ${computedScore}% (formula v1.0-scoring).`
-            : `No selection rounds have been completed yet for ${companyName} (${fieldName}). Complete practice modules to generate telemetry.`,
+          executiveSummary: `Candidate completed selection round(s) for ${companyName} (${fieldName}) achieving a deterministic readiness score of ${computedScore}% (formula v1.0-scoring).`,
           roundBreakdown: roundBreakdown.length > 0 ? roundBreakdown : [
-            { roundName: "Selection Diagnostic", score: 0, oneLineTakeaway: "No practice rounds completed yet." }
+            { roundName: "Selection Diagnostic", score: computedScore, oneLineTakeaway: "Round metrics consolidated." }
           ],
           topPriorityActions: [
-            "Complete Stage 2 Aptitude & Technical MCQs to establish core score metrics.",
-            "Attempt Stage 4 Coding challenges for automated test-case evaluation.",
-            "Practice Stage 6 AI Mock Interview for speech and confidence telemetry."
+            "Review topic feedback from your interview turns.",
+            "Practice remaining technical rounds to maximize composite score."
           ],
-          encouragingClosingNote: computedScore > 0 
-            ? `Good effort on your ${companyName} diagnostic! Continue completing remaining rounds to boost your score.`
-            : `Welcome to Placement Prep! Start with your first round to generate your personalized diagnostic report.`
+          encouragingClosingNote: `Good effort on your ${companyName} diagnostic! Continue completing remaining rounds to boost your score.`
         };
 
-        console.log('[FinalReportPage] [setState START] setReport(fallback)');
         setReport(fallback);
-        console.log('[FinalReportPage] [setState COMPLETE] report state populated with authentic context fallback');
       } finally {
-        console.log('[FinalReportPage] [setState START] setLoading(false)');
         setLoading(false);
-        console.log('[FinalReportPage] [setState COMPLETE] loading reset to false');
       }
     };
 
     generateReport();
-  }, [readOnlyReport]);
+  }, [hasValidSession, checkingSession, report]);
 
   const readinessScore = report?.readinessScore ?? 0;
+
+  // Step 3 Guard: Verifying Session Loading
+  if (checkingSession) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 p-6">
+        <div className="w-12 h-12 rounded-2xl bg-rust-500 text-white flex items-center justify-center shadow-glow-rust animate-pulse">
+          <Activity className="w-6 h-6 animate-spin" />
+        </div>
+        <p className="text-xs font-mono font-bold text-warmtext-700">Verifying Interview Session...</p>
+      </div>
+    );
+  }
+
+  const handleLoadSampleReport = () => {
+    const demoReport = {
+      readinessScore: 86,
+      overallInterviewScore: 86,
+      readinessLabel: "Placement Ready Candidate",
+      scoringFormulaName: "Deterministic Placement Readiness Formula",
+      scoringFormulaVersion: "v1.0-scoring",
+      dimensionScores: {
+        algorithmicProblemSolving: 88,
+        systemDesignArchitecture: 84,
+        communicationComposure: 85,
+        culturalLeadershipAlignment: 87
+      },
+      topicMastery: [
+        { topic: "Data Structures & Trees", masteryPercent: 92, status: "Mastered" },
+        { topic: "OOP & System Modularity", masteryPercent: 88, status: "Proficient" },
+        { topic: "Database Indexing & Locks", masteryPercent: 80, status: "Proficient" },
+        { topic: "Distributed Caching (Redis)", masteryPercent: 68, status: "Developing" }
+      ],
+      executiveSummary: `Candidate demonstrates strong technical competence across data structures, system architecture, and communicative reasoning for ${companyName} (${fieldName}). Algorithmic Big-O articulation and gaze composure remained consistent across all rounds.`,
+      roundBreakdown: [
+        { roundName: "Stage 1: Resume ATS Audit", score: 84, oneLineTakeaway: "Strong keyword alignment with 84% ATS match score." },
+        { roundName: "Stage 2: Aptitude & GK Round", score: 87, oneLineTakeaway: "Scored 87% with high speed on Quantitative and Logical puzzles." },
+        { roundName: "Stage 3: Technical MCQs (DBMS / OS)", score: 85, oneLineTakeaway: "Accurate lock contention & memory management analysis." },
+        { roundName: "Stage 4: DSA Coding Round", score: 90, oneLineTakeaway: "Optimal O(N) solution with comprehensive edge case validation." },
+        { roundName: "Stage 5: System Design Architecture", score: 84, oneLineTakeaway: "Microservice decoupling with load balancer & database replication." },
+        { roundName: "Stage 6: Technical AI Mock Interview", score: 86, oneLineTakeaway: "Articulate Big-O reasoning with low filler word frequency (1.2/min)." },
+        { roundName: "Stage 7: HR Cultural Fit Round", score: 88, oneLineTakeaway: "Clear STAR format responses aligned with leadership principles." }
+      ],
+      topPriorityActions: [
+        "Deepen distributed cache-invalidation strategies and write-behind patterns.",
+        "Refine trade-off articulation between SQL and NoSQL storage engines at scale.",
+        "Maintain current steady speech pace (135-140 WPM) during high-pressure questions."
+      ],
+      encouragingClosingNote: `Outstanding readiness profile for ${companyName}! You are well within the hiring threshold for top-tier product engineering.`
+    };
+    setReport(demoReport);
+    setHasValidSession(true);
+    setCheckingSession(false);
+    setLoading(false);
+  };
+
+  // Step 3 Hard Guard: Empty State if no real, completed interview session found
+  if (!hasValidSession) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8 bg-peach-50 rounded-3xl border border-warmborder shadow-warm-md space-y-6 max-w-2xl mx-auto my-8 animate-fade-in">
+        <div className="w-16 h-16 rounded-2xl bg-peach-100 border border-warmborder flex items-center justify-center text-rust-500 shadow-warm-sm">
+          <AlertCircle className="w-8 h-8" />
+        </div>
+        <div className="space-y-2 max-w-md">
+          <h2 className="text-2xl font-bold font-serif text-warmtext-900">
+            No completed interview found.
+          </h2>
+          <p className="text-xs text-warmtext-600">
+            Complete an interview round first to generate your personalized telemetry, speech metrics, and answer analysis, or explore a sample report.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <button
+            onClick={handleLoadSampleReport}
+            className="px-6 py-3 rounded-full bg-rust-500 hover:bg-rust-600 text-white font-extrabold text-xs shadow-glow-rust transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Preview Sample Diagnostic Report</span>
+          </button>
+          <button
+            onClick={() => navigate('/companies')}
+            className="px-6 py-3 rounded-full bg-white hover:bg-peach-100 text-warmtext-900 border border-warmborder font-bold text-xs shadow-warm-sm transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Building2 className="w-4 h-4 text-rust-500" />
+            <span>Select Company</span>
+          </button>
+          <button
+            onClick={() => navigate('/select-field')}
+            className="px-6 py-3 rounded-full bg-white hover:bg-peach-100 text-warmtext-900 border border-warmborder font-bold text-xs shadow-warm-sm transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <Target className="w-4 h-4 text-dustyrose-500" />
+            <span>Select Field</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
 
   return (
@@ -1021,230 +1205,236 @@ export default function FinalReportPage() {
             </div>
 
             {/* Speech Telemetry & Communication Sub-Score Accordion */}
-            <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
-              <div 
-                onClick={() => setSpeechTelemetryExpanded(!speechTelemetryExpanded)}
-                className="flex items-center justify-between cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-mint-100 text-leaf-600 border border-warmborder flex items-center justify-center font-bold shadow-warm-sm">
-                    <Mic className="w-5 h-5" />
+            {commScoreObj && commScoreObj.communicationScore !== null && (commScoreObj.breakdown || []).length > 0 && (
+              <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
+                <div 
+                  onClick={() => setSpeechTelemetryExpanded(!speechTelemetryExpanded)}
+                  className="flex items-center justify-between cursor-pointer select-none"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-mint-100 text-leaf-600 border border-warmborder flex items-center justify-center font-bold shadow-warm-sm">
+                      <Mic className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Speech Telemetry & Communication Sub-Score</h3>
+                        <span className="px-3 py-0.5 rounded-full font-bold font-serif text-xs bg-gold-100 text-gold-600 border border-gold-200">
+                          {commScoreObj.communicationScore}% Sub-Score
+                        </span>
+                      </div>
+                      <p className="text-xs text-darkcharcoal-500">
+                        Pacing (WPM), filler word count, silence gaps (&gt;2s), and Web Speech API segment recognition clarity.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Speech Telemetry & Communication Sub-Score</h3>
-                      <span className="px-3 py-0.5 rounded-full font-bold font-serif text-xs bg-gold-100 text-gold-600 border border-gold-200">
-                        {commScoreObj.communicationScore}% Sub-Score
+
+                  <button className="p-2 rounded-full bg-mint-100 border border-warmborder text-darkcharcoal-900 hover:bg-mint-200 transition-colors">
+                    {speechTelemetryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                {/* Overview Stats Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
+                  <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
+                    <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Avg Speaking Pace</span>
+                    <div className="font-bold font-mono text-lg text-leaf-600">{commScoreObj.avgWpm} WPM</div>
+                    <div className="text-[10px] text-darkcharcoal-500">Target: 120-160 WPM</div>
+                  </div>
+                  <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
+                    <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Total Filler Words</span>
+                    <div className="font-bold font-mono text-lg text-gold-600">{commScoreObj.totalFillers}</div>
+                    <div className="text-[10px] text-darkcharcoal-500">um, uh, like, basically</div>
+                  </div>
+                  <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
+                    <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Long Pauses (&gt;2s)</span>
+                    <div className="font-bold font-mono text-lg text-gold-600">{commScoreObj.totalPauses}</div>
+                    <div className="text-[10px] text-darkcharcoal-500">Silence gaps flagged</div>
+                  </div>
+                  <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
+                    <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Clarity Proxy %</span>
+                    <div className="font-bold font-mono text-lg text-leaf-600">{commScoreObj.avgClarityProxy}%</div>
+                    <div className="text-[10px] text-darkcharcoal-500">Recognition confidence</div>
+                  </div>
+                </div>
+
+                {/* Expandable Per-Answer Breakdown */}
+                {speechTelemetryExpanded && (
+                  <div className="space-y-3 pt-3 border-t border-warmborder animate-fadeIn">
+                    <div className="flex items-center justify-between text-xs text-darkcharcoal-500">
+                      <span className="font-bold text-leaf-600 uppercase font-mono text-[10px]">Per-Answer Speech Telemetry Breakdown:</span>
+                      <span className="flex items-center gap-1 text-[10px] text-darkcharcoal-500">
+                        <Info className="w-3 h-3 text-leaf-600" />
+                        Note: Voice clarity is measured via Web Speech API recognition segment confidence proxy.
                       </span>
                     </div>
-                    <p className="text-xs text-darkcharcoal-500">
-                      Pacing (WPM), filler word count, silence gaps (&gt;2s), and Web Speech API segment recognition clarity.
-                    </p>
-                  </div>
-                </div>
 
-                <button className="p-2 rounded-full bg-mint-100 border border-warmborder text-darkcharcoal-900 hover:bg-mint-200 transition-colors">
-                  {speechTelemetryExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-              </div>
-
-              {/* Overview Stats Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-1">
-                <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
-                  <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Avg Speaking Pace</span>
-                  <div className="font-bold font-mono text-lg text-leaf-600">{commScoreObj.avgWpm} WPM</div>
-                  <div className="text-[10px] text-darkcharcoal-500">Target: 120-160 WPM</div>
-                </div>
-                <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
-                  <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Total Filler Words</span>
-                  <div className="font-bold font-mono text-lg text-gold-600">{commScoreObj.totalFillers}</div>
-                  <div className="text-[10px] text-darkcharcoal-500">um, uh, like, basically</div>
-                </div>
-                <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
-                  <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Long Pauses (&gt;2s)</span>
-                  <div className="font-bold font-mono text-lg text-gold-600">{commScoreObj.totalPauses}</div>
-                  <div className="text-[10px] text-darkcharcoal-500">Silence gaps flagged</div>
-                </div>
-                <div className="bg-mint-50 rounded-2xl p-3.5 border border-warmborder space-y-1 shadow-warm-sm">
-                  <span className="text-darkcharcoal-500 text-[10px] uppercase tracking-wider font-bold">Clarity Proxy %</span>
-                  <div className="font-bold font-mono text-lg text-leaf-600">{commScoreObj.avgClarityProxy}%</div>
-                  <div className="text-[10px] text-darkcharcoal-500">Recognition confidence</div>
-                </div>
-              </div>
-
-              {/* Expandable Per-Answer Breakdown */}
-              {speechTelemetryExpanded && (
-                <div className="space-y-3 pt-3 border-t border-warmborder animate-fadeIn">
-                  <div className="flex items-center justify-between text-xs text-darkcharcoal-500">
-                    <span className="font-bold text-leaf-600 uppercase font-mono text-[10px]">Per-Answer Speech Telemetry Breakdown:</span>
-                    <span className="flex items-center gap-1 text-[10px] text-darkcharcoal-500">
-                      <Info className="w-3 h-3 text-leaf-600" />
-                      Note: Voice clarity is measured via Web Speech API recognition segment confidence proxy.
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {commScoreObj.breakdown.map((item, i) => (
-                      <div key={i} className="p-3.5 rounded-2xl bg-mint-50 border border-warmborder text-xs space-y-1 shadow-warm-sm">
-                        <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
-                          <span className="truncate max-w-lg">Answer {item.answerIndex}: {item.questionText}</span>
-                          <span className="font-mono text-leaf-600 text-[11px] font-semibold">{item.wpm} WPM</span>
+                    <div className="space-y-2">
+                      {commScoreObj.breakdown.map((item, i) => (
+                        <div key={i} className="p-3.5 rounded-2xl bg-mint-50 border border-warmborder text-xs space-y-1 shadow-warm-sm">
+                          <div className="flex items-center justify-between font-serif font-bold text-darkcharcoal-900">
+                            <span className="truncate max-w-lg">Answer {item.answerIndex}: {item.questionText}</span>
+                            <span className="font-mono text-leaf-600 text-[11px] font-semibold">{item.wpm} WPM</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-[11px] font-mono text-darkcharcoal-700">
+                            <span>Fillers: <strong className="text-gold-600">{item.fillers}</strong></span>
+                            <span>Pauses (&gt;2s): <strong className="text-gold-600">{item.pauses}</strong></span>
+                            <span>Clarity Proxy: <strong className="text-leaf-600">{item.clarityProxy}%</strong></span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-4 text-[11px] font-mono text-darkcharcoal-700">
-                          <span>Fillers: <strong className="text-gold-600">{item.fillers}</strong></span>
-                          <span>Pauses (&gt;2s): <strong className="text-gold-600">{item.pauses}</strong></span>
-                          <span>Clarity Proxy: <strong className="text-leaf-600">{item.clarityProxy}%</strong></span>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             {/* Session Eye Contact & Attentiveness Timeline */}
-            <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-warmborder pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-leaf-600" />
-                    <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Session Eye Contact & Attentiveness Timeline</h3>
+            {sessionEmotionObj && (sessionEmotionObj.timeline || []).length > 0 && (
+              <div className="rounded-3xl bg-white p-6 space-y-4 border border-warmborder shadow-warm-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-warmborder pb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Brain className="w-5 h-5 text-leaf-600" />
+                      <h3 className="text-base font-bold font-serif text-darkcharcoal-900">Session Eye Contact & Attentiveness Timeline</h3>
+                    </div>
+                    <p className="text-xs text-darkcharcoal-500 mt-0.5">
+                      Continuous frame-level gaze centering and camera presence tracking (pure physical telemetry; zero emotion classification).
+                    </p>
                   </div>
-                  <p className="text-xs text-darkcharcoal-500 mt-0.5">
-                    Continuous frame-level gaze centering and camera presence tracking (pure physical telemetry; zero emotion classification).
-                  </p>
+
+                  <div className="inline-block px-3.5 py-1.5 rounded-full bg-gold-100 border border-gold-200 text-gold-600 font-serif text-xs font-bold shadow-warm-sm">
+                    💡 {sessionEmotionObj.summaryLabel}
+                  </div>
                 </div>
 
-                <div className="inline-block px-3.5 py-1.5 rounded-full bg-gold-100 border border-gold-200 text-gold-600 font-serif text-xs font-bold shadow-warm-sm">
-                  💡 {sessionEmotionObj.summaryLabel}
+                {/* Recharts Attentiveness Line Chart */}
+                <div className="h-44 w-full pt-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={sessionEmotionObj.timeline} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#D6E2CE" />
+                      <XAxis dataKey="time" stroke="#4C5E47" fontSize={11} />
+                      <YAxis domain={[0, 100]} stroke="#4C5E47" fontSize={11} tickFormatter={(val) => val >= 85 ? 'Centered' : val >= 60 ? 'Shifted' : 'Absent'} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#D6E2CE', borderRadius: '16px', fontSize: '12px', color: '#1F2E1A', boxShadow: '0 8px 24px -4px rgba(31,46,26,0.08)' }}
+                        formatter={(val, name, item) => [`State: ${item.payload.state || item.payload.bucket}`, 'Attentiveness Level']}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="composureScore"
+                        stroke="#5B8C3E"
+                        strokeWidth={3}
+                        dot={{ r: 5, fill: '#D99B26', strokeWidth: 2, stroke: '#FFFFFF' }}
+                        activeDot={{ r: 7 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Attentiveness Breakdown Badges */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs border-t border-warmborder">
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-warmborder font-bold font-mono">
+                      Eye Contact: {sessionEmotionObj.bucketPercentages?.EyeContact ?? sessionEmotionObj.bucketPercentages?.Confident ?? 0}%
+                    </span>
+                    <span className="px-3 py-1 rounded-full bg-gold-100 text-gold-600 border border-gold-200 font-bold font-mono">
+                      Camera Presence: {sessionEmotionObj.bucketPercentages?.Presence ?? 0}%
+                    </span>
+                    <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-leaf-200 font-bold font-mono">
+                      Head Stability: {sessionEmotionObj.bucketPercentages?.HeadStability ?? 0}%
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-darkcharcoal-500">Sampled @ 1-second intervals</span>
                 </div>
               </div>
-
-              {/* Recharts Attentiveness Line Chart */}
-              <div className="h-44 w-full pt-1">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={sessionEmotionObj.timeline} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#D6E2CE" />
-                    <XAxis dataKey="time" stroke="#4C5E47" fontSize={11} />
-                    <YAxis domain={[0, 100]} stroke="#4C5E47" fontSize={11} tickFormatter={(val) => val >= 85 ? 'Centered' : val >= 60 ? 'Shifted' : 'Absent'} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#FFFFFF', borderColor: '#D6E2CE', borderRadius: '16px', fontSize: '12px', color: '#1F2E1A', boxShadow: '0 8px 24px -4px rgba(31,46,26,0.08)' }}
-                      formatter={(val, name, item) => [`State: ${item.payload.state || item.payload.bucket}`, 'Attentiveness Level']}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="composureScore"
-                      stroke="#5B8C3E"
-                      strokeWidth={3}
-                      dot={{ r: 5, fill: '#D99B26', strokeWidth: 2, stroke: '#FFFFFF' }}
-                      activeDot={{ r: 7 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Attentiveness Breakdown Badges */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs border-t border-warmborder">
-                <div className="flex items-center gap-3">
-                  <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-warmborder font-bold font-mono">
-                    Eye Contact: {sessionEmotionObj.bucketPercentages?.EyeContact ?? sessionEmotionObj.bucketPercentages?.Confident ?? 88}%
-                  </span>
-                  <span className="px-3 py-1 rounded-full bg-gold-100 text-gold-600 border border-gold-200 font-bold font-mono">
-                    Camera Presence: {sessionEmotionObj.bucketPercentages?.Presence ?? 95}%
-                  </span>
-                  <span className="px-3 py-1 rounded-full bg-mint-100 text-leaf-600 border border-leaf-200 font-bold font-mono">
-                    Head Stability: {sessionEmotionObj.bucketPercentages?.HeadStability ?? 90}%
-                  </span>
-                </div>
-                <span className="text-[10px] text-darkcharcoal-500">Sampled @ 1-second intervals</span>
-              </div>
-            </div>
+            )}
 
             {/* Top 3 Answer Refinements & Side-by-Side Analysis */}
-            <div className="space-y-4 pt-2">
-              <div className="flex items-center justify-between border-b border-warmborder pb-2">
-                <div className="flex items-center gap-2 text-base font-bold font-serif text-darkcharcoal-900">
-                  <GitCompare className="w-5 h-5 text-leaf-600" />
-                  <span>Top 3 Answer Refinements & Side-by-Side Analysis</span>
+            {weakestVoiceAnswers && weakestVoiceAnswers.length > 0 && (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center justify-between border-b border-warmborder pb-2">
+                  <div className="flex items-center gap-2 text-base font-bold font-serif text-darkcharcoal-900">
+                    <GitCompare className="w-5 h-5 text-leaf-600" />
+                    <span>Top 3 Answer Refinements & Side-by-Side Analysis</span>
+                  </div>
+                  <span className="text-xs text-darkcharcoal-500 font-mono">
+                    Benchmark Analysis for Lowest-Scoring Answers
+                  </span>
                 </div>
-                <span className="text-xs text-darkcharcoal-500 font-mono">
-                  Benchmark Analysis for Lowest-Scoring Answers
-                </span>
-              </div>
 
-              <div className="space-y-4">
-                {weakestVoiceAnswers.map((item, idx) => (
-                  <div key={item.id} className="rounded-2xl bg-mint-50 p-5 border border-warmborder space-y-3 shadow-warm-sm">
-                    <div className="flex items-center justify-between border-b border-warmborder pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-leaf-500 text-white font-extrabold text-xs flex items-center justify-center font-serif">
-                          #{idx + 1}
-                        </span>
-                        <span className="text-xs font-bold text-darkcharcoal-900 font-serif">{item.questionText}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {item.isFallbackQuestion && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 font-mono">
-                            Fallback Question
+                <div className="space-y-4">
+                  {weakestVoiceAnswers.map((item, idx) => (
+                    <div key={item.id} className="rounded-2xl bg-mint-50 p-5 border border-warmborder space-y-3 shadow-warm-sm">
+                      <div className="flex items-center justify-between border-b border-warmborder pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-leaf-500 text-white font-extrabold text-xs flex items-center justify-center font-serif">
+                            #{idx + 1}
                           </span>
-                        )}
-                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold font-mono border ${
-                          item.score === null 
-                            ? 'bg-amber-100 text-amber-800 border-amber-300' 
-                            : 'bg-gold-100 text-gold-600 border-gold-200'
-                        }`}>
-                          {item.score === null ? 'Excluded from scoring' : `${item.score}% Score`}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                      {/* Left Column: Your Spoken Answer */}
-                      <div className="p-3.5 rounded-xl bg-white border border-warmborder space-y-1.5 shadow-warm-sm">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-darkcharcoal-500 flex items-center gap-1 font-mono">
-                          <Mic className="w-3 h-3 text-darkcharcoal-500" /> Your Spoken Answer:
+                          <span className="text-xs font-bold text-darkcharcoal-900 font-serif">{item.questionText}</span>
                         </div>
-                        <p className="text-darkcharcoal-900 italic leading-relaxed text-[11px]">
-                          "{item.userTranscript}"
-                        </p>
-                      </div>
-
-                      {/* Right Column: Strong Sample Answer */}
-                      <div className="p-3.5 rounded-xl bg-mint-100 border border-warmborder space-y-1.5 shadow-warm-sm">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-leaf-600 flex items-center gap-1 font-mono">
-                          <Sparkles className="w-3 h-3 text-leaf-600" /> Strong Sample Answer:
-                        </div>
-                        <p className="text-darkcharcoal-900 font-medium leading-relaxed text-[11px]">
-                          "{item.strongSampleAnswer}"
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Diff Explanation Box & Traceable Quote */}
-                    <div className="space-y-2">
-                      {item.evidenceQuote && (
-                        <div className="p-3 rounded-xl bg-amber-50/80 border border-gold-300 text-xs text-darkcharcoal-900 shadow-warm-sm">
-                          <span className="text-[10px] font-bold text-gold-700 uppercase tracking-wider block font-mono">
-                            Verifiable Spoken Transcript Evidence:
+                        <div className="flex items-center gap-2">
+                          {item.isFallbackQuestion && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 font-mono">
+                              Fallback Question
+                            </span>
+                          )}
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold font-mono border ${
+                            item.score === null 
+                              ? 'bg-amber-100 text-amber-800 border-amber-300' 
+                              : 'bg-gold-100 text-gold-600 border-gold-200'
+                          }`}>
+                            {item.score === null ? 'Excluded from scoring' : `${item.score}% Score`}
                           </span>
-                          <p className="italic font-serif font-medium pt-0.5 text-[11px]">
-                            "You said: '{item.evidenceQuote}' — this reflects a gap in candidate depth."
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        {/* Left Column: Your Spoken Answer */}
+                        <div className="p-3.5 rounded-xl bg-white border border-warmborder space-y-1.5 shadow-warm-sm">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-darkcharcoal-500 flex items-center gap-1 font-mono">
+                            <Mic className="w-3 h-3 text-darkcharcoal-500" /> Your Spoken Answer:
+                          </div>
+                          <p className="text-darkcharcoal-900 italic leading-relaxed text-[11px]">
+                            "{item.userTranscript}"
                           </p>
                         </div>
-                      )}
 
-                      <div className="p-3 rounded-xl bg-white border border-warmborder text-[11px] text-darkcharcoal-900 flex items-start gap-2 shadow-warm-sm">
-                        <MessageSquareCode className="w-4 h-4 text-leaf-600 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="text-leaf-600 font-serif">Key Delta & Missing Elements: </strong>
-                          <span>{item.diffExplanation}</span>
+                        {/* Right Column: Strong Sample Answer */}
+                        <div className="p-3.5 rounded-xl bg-mint-100 border border-warmborder space-y-1.5 shadow-warm-sm">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-leaf-600 flex items-center gap-1 font-mono">
+                            <Sparkles className="w-3 h-3 text-leaf-600" /> Strong Sample Answer:
+                          </div>
+                          <p className="text-darkcharcoal-900 font-medium leading-relaxed text-[11px]">
+                            "{item.strongSampleAnswer}"
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Diff Explanation Box & Traceable Quote */}
+                      <div className="space-y-2">
+                        {item.evidenceQuote && (
+                          <div className="p-3 rounded-xl bg-amber-50/80 border border-gold-300 text-xs text-darkcharcoal-900 shadow-warm-sm">
+                            <span className="text-[10px] font-bold text-gold-700 uppercase tracking-wider block font-mono">
+                              Verifiable Spoken Transcript Evidence:
+                            </span>
+                            <p className="italic font-serif font-medium pt-0.5 text-[11px]">
+                              "You said: '{item.evidenceQuote}' — this reflects a gap in candidate depth."
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="p-3 rounded-xl bg-white border border-warmborder text-[11px] text-darkcharcoal-900 flex items-start gap-2 shadow-warm-sm">
+                          <MessageSquareCode className="w-4 h-4 text-leaf-600 shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="text-leaf-600 font-serif">Key Delta & Missing Elements: </strong>
+                            <span>{item.diffExplanation}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Topic-Wise Mastery Scores (Derived directly from evaluationLog) */}
             {report?.topicMastery && report.topicMastery.length > 0 && (

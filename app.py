@@ -1032,9 +1032,47 @@ RUBRIC_DATABASE = {
     }
 }
 INTERVIEW_RUBRICS_VERSION = 'v1.0-interviewRubrics'
+
+SAMPLE_QUESTIONS_BY_TOPIC = {
+    "oop-inheritance": "Explain the concept of Inheritance in OOP, contrast it with Composition, and describe a scenario where inheriting from a class would be an anti-pattern.",
+    "oop-polymorphism": "What is Polymorphism in object-oriented design? Differentiate between compile-time and runtime polymorphism with concrete code examples.",
+    "oop-encapsulation-abstraction": "Explain the difference between Encapsulation and Abstraction in OOP, and show how getter/setter validation protects class invariants.",
+    "dbms-normalization": "Walk through 1NF, 2NF, and 3NF database normalization rules using an e-commerce Order-Item schema example, and explain when denormalization is justified.",
+    "dbms-transactions-acid": "Explain ACID properties in relational databases. How do isolation levels (Read Committed vs Serializable) handle dirty reads and phantom reads during concurrent bank account transfers?",
+    "dbms-indexing-b-trees": "How do B+Tree database indexes work? Compare Clustered and Non-Clustered indexes and explain why indexing low-cardinality boolean columns is inefficient.",
+    "ds-arrays-linkedlists": "Compare Arrays and Linked Lists regarding memory layout, cache performance, and time complexity for random access vs insertion.",
+    "ds-hash-tables": "Explain how a Hash Table works under the hood. Compare Separate Chaining and Open Addressing for collision resolution and explain why rehashing is necessary.",
+    "ds-trees-bst": "What is a Binary Search Tree? How does In-Order traversal work, and why do self-balancing trees like Red-Black Trees matter?",
+    "sysdesign-caching": "Explain Cache-Aside vs Write-Through caching patterns. How does an LRU cache eviction policy work, and how do you handle cache invalidation?",
+    "sysdesign-load-balancing": "Compare Layer 4 and Layer 7 Load Balancing. How does Consistent Hashing prevent massive key redistribution when backend nodes join or leave a cluster?",
+    "sysdesign-cap-theorem": "Explain the CAP Theorem. Why is Partition Tolerance mandatory in distributed systems, and how do CP vs AP databases handle network splits?",
+    "qa-stlc-test-pyramid": "Explain the Software Testing Life Cycle (STLC) phases. Describe the Test Pyramid and explain why over-relying on UI automation tests is an anti-pattern.",
+    "qa-bva-equivalence": "Given an input field accepting password lengths between 8 and 16 characters, derive exact test cases using Boundary Value Analysis and Equivalence Partitioning.",
+    "qa-selenium-pom": "Explain the Page Object Model (POM) architecture in web test automation. Why are Explicit Waits superior to Thread.sleep(), and how do you organize page classes?",
+    "ds-sql-aggregations-joins": "Compare INNER JOIN vs LEFT JOIN. Explain the difference between ROW_NUMBER(), RANK(), and DENSE_RANK() using an employee salary ranking dataset.",
+    "ds-stats-hypothesis-testing": "Explain Hypothesis Testing in A/B testing. Define P-value, Type I vs Type II errors, and statistical power to a non-technical stakeholder.",
+    "ds-ml-bias-variance": "Explain the Bias-Variance Tradeoff. How do you detect Overfitting, and how do L1 (Lasso) and L2 (Ridge) regularization mitigate it?",
+    "ds-ml-evaluation-metrics": "Why is Accuracy a misleading metric for imbalanced fraud detection? Compare Precision, Recall, and F1-Score, and state which metric you would optimize.",
+    "behavioral-handling-conflict": "Describe a time when you strongly disagreed with a teammate or lead on a technical approach. How did you resolve the conflict and what was the outcome?",
+    "behavioral-ownership-failure": "Tell me about a time when you made a mistake or owned a feature rollout that failed. What went wrong, how did you handle it, and what did you learn?",
+    "behavioral-ambiguity-adaptability": "Tell me about a project where you were given ambiguous requirements or minimal guidance. How did you define the scope and deliver results?",
+    "behavioral-prioritization": "How do you prioritize your work when faced with multiple urgent tasks and tight deadlines? Give a specific real-world example.",
+    "behavioral-motivation-company": "Why do you want to join our engineering team specifically, and which of our company values or products resonates most with your working style?",
+    "behavioral-strengths-self-awareness": "What do you consider your greatest professional strength, and what is one real technical or soft skill area you are actively working to improve?",
+    "behavioral-leadership-mentorship": "Tell me about a time you took the initiative to drive a project forward, improve a team process, or mentor a peer who was struggling.",
+    "behavioral-ethics-integrity": "Describe a situation where you faced an ethical dilemma or pressure to compromise on security/quality to meet a deadline. How did you handle it?",
+    "devops-cicd-iac": "Explain CI/CD pipeline stages. Compare Blue/Green and Canary deployment strategies and explain why Infrastructure as Code (IaC) is essential for cloud reliability.",
+    "cybersecurity-owasp-auth": "Distinguish between Authentication and Authorization. Explain SQL Injection and Cross-Site Scripting (XSS) from OWASP Top 10 and how to prevent them in web applications."
+}
+
+for _tid, _sq in SAMPLE_QUESTIONS_BY_TOPIC.items():
+    if _tid in RUBRIC_DATABASE:
+        RUBRIC_DATABASE[_tid]['sampleQuestion'] = _sq
+
 for _rubric in RUBRIC_DATABASE.values():
     if isinstance(_rubric, dict):
         _rubric.setdefault('rubricVersion', INTERVIEW_RUBRICS_VERSION)
+
 
 
 def validate_evidence_quote(quote: str, transcript: str) -> bool:
@@ -1202,6 +1240,7 @@ Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT struct
   "evidenceQuote": "exact quote from candidate transcript",
   "uncertainty": "low",
   "confidenceOfStudent": "medium",
+  "rubricVersion": "{rubric_version}",
   "followUpWorthy": true,
   "reason": "Brief internal justification referencing the specific rubric concepts."
 }}
@@ -1209,29 +1248,62 @@ Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT struct
 
     eval_result = None
     model_used = None
+    rejection_reason = None
+
+    def validate_evaluator_response(parsed, transcript):
+        if not isinstance(parsed, dict):
+            return False, "Response is not a valid JSON dictionary"
+        required_fields = ['verdict', 'evidenceQuote', 'conceptsCorrect', 'conceptsWrong', 'conceptsMissing', 'rubricVersion', 'uncertainty']
+        for rf in required_fields:
+            if rf not in parsed:
+                return False, f"Missing required field '{rf}'"
+        v = parsed.get('verdict')
+        if v not in ["correct", "partially_correct", "incorrect", "vague", "off_topic", "dont_know", "evaluation_unavailable"]:
+            return False, f"Invalid verdict '{v}'"
+        for lf in ['conceptsCorrect', 'conceptsWrong', 'conceptsMissing']:
+            if not isinstance(parsed.get(lf), list):
+                return False, f"Field '{lf}' must be a list"
+        unc = str(parsed.get('uncertainty', '')).lower()
+        if unc not in ["low", "medium", "high"]:
+            return False, f"Invalid uncertainty '{unc}', must be low/medium/high"
+        ev = parsed.get('evidenceQuote')
+        if ev and isinstance(ev, str) and not validate_evidence_quote(ev, transcript):
+            return False, "evidenceQuote does not match candidate transcript"
+        return True, ""
 
     raw_text, used_model = call_gemini_with_model(prompt)
     if raw_text:
         try:
             cleaned_text = clean_json_response(raw_text)
             parsed = json.loads(cleaned_text)
-            if isinstance(parsed, dict) and 'verdict' in parsed:
-                ev_quote = parsed.get('evidenceQuote', '')
-                if validate_evidence_quote(ev_quote, student_answer):
-                    eval_result = parsed
-                    model_used = used_model or "gemini"
-                else:
-                    print(f"[evaluate_answer] Evidence quote validation rejected for: '{ev_quote[:60]}...'")
+            is_valid, reason = validate_evaluator_response(parsed, student_answer)
+            if is_valid:
+                eval_result = parsed
+                model_used = used_model or "gemini"
+            else:
+                rejection_reason = reason
+                print(f"[evaluate_answer] Attempt 1 validation rejected: {reason}")
         except Exception as e:
-            print(f"Gemini API Exception in evaluate_answer attempt 1: {e}")
+            rejection_reason = f"JSON parse error: {str(e)}"
+            print(f"[evaluate_answer] Gemini API Exception attempt 1: {e}")
+    else:
+        rejection_reason = "Gemini returned empty response"
 
-    # Reject and retry once if evidenceQuote is missing or clearly doesn't match transcript
+    # Reject and retry once if response was missing required fields or invalid
     if not eval_result:
-        print("[evaluate_answer] Attempt 1 failed or evidenceQuote invalid. Retrying once with strict grounding...")
-        retry_prompt = prompt + f"""\n
+        print(f"[evaluate_answer] Retrying once with explicit correction instruction (reason: {rejection_reason})...")
+        retry_prompt = prompt + f"""
+
 CRITICAL RETRY INSTRUCTION:
-Your previous output was rejected because evidenceQuote was missing, hallucinated, or did not match the candidate's actual words.
-You must quote the exact phrase from the candidate's answer that supports your verdict in evidenceQuote. If the answer contains nothing relevant to quote, state that explicitly rather than inventing supporting evidence.
+Your previous response was invalid because: {rejection_reason or 'Missing required fields or invalid evidenceQuote'}. Return only valid JSON with all required fields:
+- verdict: one of ["correct", "partially_correct", "incorrect", "vague", "off_topic", "dont_know"]
+- evidenceQuote: exact quote from candidate transcript
+- conceptsCorrect: list of strings
+- conceptsWrong: list of strings
+- conceptsMissing: list of strings
+- rubricVersion: "{rubric_version}"
+- uncertainty: one of ["low", "medium", "high"]
+- reason: justification citing specific rubric concepts
 CANDIDATE TRANSCRIPT: "{student_answer}"
 """
         raw_retry, retry_model = call_gemini_with_model(retry_prompt)
@@ -1239,19 +1311,20 @@ CANDIDATE TRANSCRIPT: "{student_answer}"
             try:
                 cleaned_retry = clean_json_response(raw_retry)
                 parsed_retry = json.loads(cleaned_retry)
-                if isinstance(parsed_retry, dict) and 'verdict' in parsed_retry:
-                    ev_quote = parsed_retry.get('evidenceQuote', '')
-                    if validate_evidence_quote(ev_quote, student_answer):
-                        eval_result = parsed_retry
-                        model_used = retry_model or "gemini"
-                    else:
-                        print(f"[evaluate_answer] Retry evidence quote also rejected: '{ev_quote[:60]}...'")
+                is_valid_retry, retry_reason = validate_evaluator_response(parsed_retry, student_answer)
+                if is_valid_retry:
+                    eval_result = parsed_retry
+                    model_used = retry_model or "gemini"
+                else:
+                    rejection_reason = retry_reason
+                    print(f"[evaluate_answer] Retry validation rejected: {retry_reason}")
             except Exception as e:
-                print(f"Gemini API Exception in evaluate_answer retry: {e}")
+                rejection_reason = f"Retry parse error: {str(e)}"
+                print(f"[evaluate_answer] Gemini API Exception in retry: {e}")
 
-    # Fall back to clearly-labeled degraded state: evaluation_unavailable (never guess a verdict)
-    if not eval_result or not isinstance(eval_result, dict) or 'verdict' not in eval_result:
-        print(f"[DEGRADED_FALLBACK] Endpoint: /api/evaluate-answer | Model attempt: {model_used or 'primary'} | Reason: Evaluator AI call and retry failed; returning evaluation_unavailable.")
+    # Fall back to clearly-labeled degraded state: evaluation_unavailable (NEVER guess a verdict or return fake passing score)
+    if not eval_result:
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/evaluate-answer | Reason: {rejection_reason or 'Evaluator AI call and retry failed'}; returning evaluation_unavailable.")
         eval_result = {
             "verdict": "evaluation_unavailable",
             "conceptsCorrect": [],
@@ -1261,25 +1334,28 @@ CANDIDATE TRANSCRIPT: "{student_answer}"
             "rubricVersion": rubric_version,
             "modelUsed": "degraded-fallback",
             "uncertainty": "high",
+            "score": None,
+            "passed": None,
             "confidenceOfStudent": "medium",
             "followUpWorthy": False,
-            "reason": "Evaluation temporarily unavailable due to AI service issue; excluded from scoring.",
+            "reason": f"Evaluation unavailable: {rejection_reason or 'AI model failed validation/timed out'}; excluded from scoring.",
             "degraded": True,
-            "degradedReason": "AI evaluation model unavailable; turn excluded from scoring."
+            "fallbackUsed": True,
+            "degradedReason": f"Evaluator AI call failed validation or timed out ({rejection_reason or 'unavailable'}); turn excluded from scoring."
         }
     else:
-        # Guarantee all required schema fields are present and properly typed
         uncertainty_val = str(eval_result.get('uncertainty', '')).lower()
         if uncertainty_val not in ['low', 'medium', 'high']:
             uncertainty_val = 'low' if eval_result.get('verdict') == 'correct' else 'medium'
-
         eval_result['rubricVersion'] = rubric_version
         eval_result['modelUsed'] = model_used or "gemini"
         eval_result['uncertainty'] = uncertainty_val
-        eval_result['evidenceQuote'] = eval_result.get('evidenceQuote', '').strip()
-        if not eval_result.get('conceptsCorrect'): eval_result['conceptsCorrect'] = []
-        if not eval_result.get('conceptsWrong'): eval_result['conceptsWrong'] = []
-        if not eval_result.get('conceptsMissing'): eval_result['conceptsMissing'] = []
+        eval_result['evidenceQuote'] = (eval_result.get('evidenceQuote') or '').strip()
+        eval_result['conceptsCorrect'] = eval_result.get('conceptsCorrect') or []
+        eval_result['conceptsWrong'] = eval_result.get('conceptsWrong') or []
+        eval_result['conceptsMissing'] = eval_result.get('conceptsMissing') or []
+        eval_result['degraded'] = False
+        eval_result['fallbackUsed'] = False
         if 'confidenceOfStudent' not in eval_result:
             eval_result['confidenceOfStudent'] = 'high' if eval_result.get('verdict') == 'correct' else 'medium'
         if 'followUpWorthy' not in eval_result:
@@ -1310,6 +1386,7 @@ def check_navigation_intent(student_answer: str) -> dict:
             'strategy': 'repeat_question',
             'topicAdvance': False,
             'newDifficultyLevel': None,
+            'decisionState': 'CLARIFY',
             'isNavigation': True
         }
 
@@ -1329,34 +1406,48 @@ def check_navigation_intent(student_answer: str) -> dict:
             'strategy': 'simplify_question',
             'topicAdvance': False,
             'newDifficultyLevel': None,
+            'decisionState': 'CLARIFY',
             'isNavigation': True
         }
 
     return None
 
 
+INTERVIEW_STATES = ['PLAN', 'ASK', 'ANALYZE', 'DECIDE', 'PROBE', 'CLARIFY', 'ADVANCE', 'CLOSE_TOPIC', 'NEXT', 'FINISH']
+MAX_PROBES_PER_TOPIC = 2  # configurable constant, default 2 for time-boxed demo rounds (max 3)
+
+
 def evaluate_decision_engine(evaluator_output: dict, session_state: dict, student_answer: str = "") -> dict:
     """
-    Pure, rule-based Decision Engine (Prompt 4).
-    Maps Evaluator outputs & session state to strategy.
+    Pure, rule-based Decision Engine (Prompt 4 & Playbook Hardening).
+    Maps Evaluator outputs & session state to strategy and decisionState.
     """
     nav_intent = check_navigation_intent(student_answer)
     if nav_intent:
+        nav_intent['decisionState'] = 'CLARIFY'
         return nav_intent
 
     current_depth = session_state.get('currentDepth', 0) if isinstance(session_state, dict) else 0
+    probe_count = session_state.get('probeCount') if isinstance(session_state, dict) else None
+    effective_probes = probe_count if probe_count is not None else current_depth
+    is_capped = (probe_count >= MAX_PROBES_PER_TOPIC) if probe_count is not None else (current_depth >= 3)
     current_diff = (session_state.get('difficultyLevel', 'medium') if isinstance(session_state, dict) else 'medium').lower()
     
     verdict = (evaluator_output.get('verdict', 'partially_correct') if isinstance(evaluator_output, dict) else 'partially_correct').lower()
     confidence = (evaluator_output.get('confidenceOfStudent', 'medium') if isinstance(evaluator_output, dict) else 'medium').lower()
     concepts_missing = evaluator_output.get('conceptsMissing', []) if isinstance(evaluator_output, dict) else []
 
-    # 1. HARD RULE: Cap cross-questioning at 3 turns per topic
-    if current_depth >= 3:
+    # 1. HARD PROBE CAP RULE: Force ADVANCE / CLOSE_TOPIC once cap is hit
+    # Never let model judgment override this limit
+    if is_capped:
         return {
             'strategy': 'move_to_next_topic',
             'topicAdvance': True,
-            'newDifficultyLevel': None
+            'newDifficultyLevel': None,
+            'decisionState': 'CLOSE_TOPIC',
+            'capped': True,
+            'probeCount': effective_probes,
+            'reason': f"Hard probe cap reached ({effective_probes}/{MAX_PROBES_PER_TOPIC} follow-ups). Moving to next topic."
         }
 
     # 2. CONSECUTIVE WEAK VERDICTS RULE (2 consecutive "incorrect" or "dont_know" on same topic)
@@ -1369,7 +1460,9 @@ def evaluate_decision_engine(evaluator_output: dict, session_state: dict, studen
             return {
                 'strategy': 'drop_difficulty_offer_easier_related',
                 'topicAdvance': True,
-                'newDifficultyLevel': lower_diff
+                'newDifficultyLevel': lower_diff,
+                'decisionState': 'ADVANCE',
+                'probeCount': probe_count
             }
 
     # 3. STRATEGY TABLE RULES
@@ -1378,13 +1471,18 @@ def evaluate_decision_engine(evaluator_output: dict, session_state: dict, studen
             return {
                 'strategy': 'probe_missing_nuance',
                 'topicAdvance': False,
-                'newDifficultyLevel': None
+                'newDifficultyLevel': None,
+                'decisionState': 'PROBE',
+                'probeCount': probe_count
             }
         next_diff = 'hard' if current_diff == 'medium' else None
+        should_advance = current_depth >= 1
         return {
             'strategy': 'increase_difficulty_or_new_topic',
-            'topicAdvance': current_depth >= 1,
-            'newDifficultyLevel': next_diff
+            'topicAdvance': should_advance,
+            'newDifficultyLevel': next_diff,
+            'decisionState': 'ADVANCE' if should_advance else 'PROBE',
+            'probeCount': probe_count
         }
 
     if verdict == 'correct':
@@ -1392,19 +1490,26 @@ def evaluate_decision_engine(evaluator_output: dict, session_state: dict, studen
             return {
                 'strategy': 'probe_missing_nuance',
                 'topicAdvance': False,
-                'newDifficultyLevel': None
+                'newDifficultyLevel': None,
+                'decisionState': 'PROBE',
+                'probeCount': probe_count
             }
+        should_advance = current_depth >= 1
         return {
             'strategy': 'increase_difficulty_or_new_topic',
-            'topicAdvance': current_depth >= 1,
-            'newDifficultyLevel': None
+            'topicAdvance': should_advance,
+            'newDifficultyLevel': None,
+            'decisionState': 'ADVANCE' if should_advance else 'PROBE',
+            'probeCount': probe_count
         }
 
     if verdict == 'partially_correct':
         return {
             'strategy': 'affirm_correct_part_and_crossquestion_wrong_part',
             'topicAdvance': False,
-            'newDifficultyLevel': None
+            'newDifficultyLevel': None,
+            'decisionState': 'PROBE',
+            'probeCount': probe_count
         }
 
     if verdict == 'incorrect':
@@ -1412,33 +1517,43 @@ def evaluate_decision_engine(evaluator_output: dict, session_state: dict, studen
             return {
                 'strategy': 'guiding_question_no_reveal',
                 'topicAdvance': False,
-                'newDifficultyLevel': None
+                'newDifficultyLevel': None,
+                'decisionState': 'PROBE',
+                'probeCount': probe_count
             }
         else:
             return {
                 'strategy': 'gentle_correct_then_retest',
                 'topicAdvance': False,
-                'newDifficultyLevel': None
+                'newDifficultyLevel': None,
+                'decisionState': 'PROBE',
+                'probeCount': probe_count
             }
 
     if verdict in ['vague', 'off_topic']:
         return {
             'strategy': 'ask_narrower_version',
             'topicAdvance': False,
-            'newDifficultyLevel': None
+            'newDifficultyLevel': None,
+            'decisionState': 'PROBE',
+            'probeCount': probe_count
         }
 
     if verdict == 'dont_know':
         return {
             'strategy': 'simplify_or_hint',
             'topicAdvance': False,
-            'newDifficultyLevel': None
+            'newDifficultyLevel': None,
+            'decisionState': 'CLARIFY',
+            'probeCount': probe_count
         }
 
     return {
         'strategy': 'affirm_correct_part_and_crossquestion_wrong_part',
         'topicAdvance': False,
-        'newDifficultyLevel': None
+        'newDifficultyLevel': None,
+        'decisionState': 'PROBE',
+        'probeCount': probe_count
     }
 
 
@@ -1454,6 +1569,8 @@ def decide_next_step():
 
     decision = evaluate_decision_engine(evaluator_output, session_state, student_answer)
     return jsonify(decision)
+
+
 @app.route('/api/generate-question', methods=['POST', 'OPTIONS'])
 def generate_question():
     if request.method == 'OPTIONS':
@@ -1467,6 +1584,7 @@ def generate_question():
     rubric_override = data.get('rubric', {})
     session_override = data.get('sessionState', {})
     is_opening = data.get('isOpening', False)
+    asked_hashes = data.get('askedQuestionHashes') or session_override.get('askedQuestionHashes') or []
 
     # Resolve Rubric & Topic Name
     if rubric_override and isinstance(rubric_override, dict):
@@ -1503,11 +1621,35 @@ def generate_question():
     if is_opening:
         sample_q = rubric.get('sampleQuestion', f"Tell me about your experience with {topic_name}.")
         return jsonify({
-            "interviewerResponse": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}"
+            "decision": "ADVANCE",
+            "probe_type": "opening",
+            "question": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}",
+            "evidence_to_probe": "Initial interview greeting",
+            "competency": topic_name,
+            "interviewerResponse": f"Hi! Welcome to your {company_name} {round_type.upper()} interview for {target_field}. Let's get started: {sample_q}",
+            "isFallback": False,
+            "fallbackQuestion": False,
+            "fallbackUsed": False,
+            "degraded": False
         })
 
+    decision_map = {
+        'move_to_next_topic': 'CLOSE_TOPIC',
+        'increase_difficulty_or_new_topic': 'ADVANCE',
+        'drop_difficulty_offer_easier_related': 'ADVANCE',
+        'repeat_question': 'CLARIFY',
+        'simplify_question': 'CLARIFY',
+        'simplify_or_hint': 'CLARIFY',
+        'probe_missing_nuance': 'PROBE',
+        'affirm_correct_part_and_crossquestion_wrong_part': 'PROBE',
+        'guiding_question_no_reveal': 'PROBE',
+        'gentle_correct_then_retest': 'PROBE',
+        'ask_narrower_version': 'PROBE'
+    }
+    expected_decision = decision_map.get(strategy, 'PROBE')
+
     prompt = f"""You are an experienced, human-like, engaging technical & behavioral interviewer at {company_name} conducting a {round_type.upper()} interview for the {target_field} role.
-Your task for this turn is FIXED by the interview decision engine: {strategy}.
+Your task for this turn is FIXED by the interview decision engine: strategy="{strategy}" (decision="{expected_decision}").
 
 EVALUATION SUMMARY OF CANDIDATE'S LAST RESPONSE:
 - What the student got right: {", ".join(concepts_correct) if concepts_correct else 'None'}
@@ -1524,37 +1666,40 @@ PREVIOUSLY ASKED QUESTIONS IN THIS SESSION (DO NOT REPEAT OR RE-ASK ANY OF THESE
 {asked_formatted}
 
 GENERATION INSTRUCTIONS FOR THIS TURN:
-Ask ONE natural, conversational turn that:
+Ask EXACTLY ONE natural, conversational turn that:
 1. Directly references what the student just said — never ignore their actual response.
 2. If strategy is "repeat_question": politely restate or clarify the previous question.
 3. If strategy is "simplify_question": ask a simplified, breakdown version of the previous question.
-4. If strategy involves not revealing the answer yet (e.g. "guiding_question_no_reveal"): ask a guiding question that lets the candidate self-correct without giving away the answer directly.
-5. If strategy is to affirm and cross-question (e.g. "affirm_correct_part_and_crossquestion_wrong_part"): briefly acknowledge what they got right before probing the misconception or missing gap.
-6. If strategy is to move to a new topic (e.g. "increase_difficulty_or_new_topic" or "move_to_next_topic"): transition naturally to the new topic ({topic_name}) rather than abruptly.
+4. If strategy is "guiding_question_no_reveal": ask a guiding question that lets the candidate self-correct without giving away the answer directly.
+5. If strategy is "affirm_correct_part_and_crossquestion_wrong_part": briefly acknowledge what they got right before probing the misconception or missing gap.
+6. If strategy is "increase_difficulty_or_new_topic" or "move_to_next_topic": transition naturally to the new topic ({topic_name}).
 7. If strategy is "simplify_or_hint": provide a gentle hint or simplify the question to help them get started.
-8. Keep it to 1-2 concise, spoken sentences. Speak like a real interviewer, not a quiz reading out loud.
-9. CRITICAL ANTI-REPETITION RULE: You MUST NOT ask any question that has already been asked in PREVIOUSLY ASKED QUESTIONS. Explore a completely fresh question or scenario on {topic_name}.
+8. Ask EXACTLY ONE question (maximum 1 question mark '?'). Do NOT string multiple questions together.
+9. Keep it to 1-2 concise, spoken sentences. Speak like a real interviewer, not a quiz reading out loud.
+10. CRITICAL ANTI-REPETITION: You MUST NOT ask any question that has already been asked. Explore a completely fresh question or scenario on {topic_name}.
 
-Return ONLY valid raw JSON with NO code blocks:
+Return ONLY valid raw JSON with NO markdown code blocks, using this EXACT structure:
 {{
-  "interviewerResponse": "Spoken interviewer response here..."
+  "decision": "{expected_decision}",
+  "probe_type": "concept_gap",
+  "question": "Single spoken interview question here?",
+  "evidence_to_probe": "Specific candidate statement or rubric concept being probed",
+  "competency": "{topic_name}"
 }}
 """
 
-    gen_resp = None
-    raw_text = call_gemini(prompt)
-    if raw_text:
-        try:
-            cleaned_text = clean_json_response(raw_text)
-            gen_resp = json.loads(cleaned_text)
-        except Exception as e:
-            print(f"Gemini API Exception in generate_question: {e}")
-
-    # Helper function to check duplicate against asked questions
     def is_duplicate_text(candidate):
         if not candidate:
             return True
-        c_words = set(re.sub(r'[^a-zA-Z0-9\s]', '', candidate.lower()).split())
+        c_clean = candidate.strip().lower()
+        h_int = 2166136261
+        for ch in re.sub(r'[^\w\s]', '', c_clean).strip():
+            h_int = ((h_int ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+        cand_hash = f"qh_{hex(h_int)[2:]}"
+        if cand_hash in asked_hashes:
+            return True
+
+        c_words = set(re.sub(r'[^a-zA-Z0-9\s]', '', c_clean).split())
         c_words = {w for w in c_words if len(w) > 3}
         if not c_words:
             return False
@@ -1569,37 +1714,98 @@ Return ONLY valid raw JSON with NO code blocks:
                 return True
         return False
 
-    candidate_text = gen_resp.get('interviewerResponse', '') if isinstance(gen_resp, dict) else ''
+    def validate_generator_response(parsed):
+        if not isinstance(parsed, dict):
+            return False, "Response is not a valid JSON dictionary"
+        req_fields = ['decision', 'probe_type', 'question', 'evidence_to_probe', 'competency']
+        for rf in req_fields:
+            if rf not in parsed or not parsed.get(rf):
+                return False, f"Missing or empty required field '{rf}'"
+        dec = parsed.get('decision')
+        if dec not in ['PROBE', 'CLARIFY', 'ADVANCE', 'CLOSE_TOPIC']:
+            return False, f"Invalid decision '{dec}', must be PROBE, CLARIFY, ADVANCE, or CLOSE_TOPIC"
+        q_str = str(parsed.get('question', '')).strip()
+        if q_str.count('?') > 1:
+            return False, f"Contains multiple questions in one turn ({q_str.count('?')} question marks found)"
+        if is_duplicate_text(q_str):
+            return False, "Repeats an already-asked question in this session"
+        return True, ""
 
-    if not candidate_text or is_duplicate_text(candidate_text):
-        print(f"[DEGRADED_FALLBACK] Endpoint: /api/generate-question | Strategy: {strategy} | Reason: AI question generator failed or was duplicate; using hardcoded fallback question.")
-        if strategy == 'repeat_question':
-            resp = "Could you please elaborate on your previous answer? I'd love to hear your thoughts again."
-        elif strategy == 'simplify_question':
-            resp = f"Let's break that down: in plain terms, how would you approach the core concept of {topic_name}?"
-        elif strategy == 'guiding_question_no_reveal':
-            resp = f"That's an interesting perspective. Think carefully about how {topic_name} behaves in practice—what trade-offs might you encounter?"
-        elif strategy in ['increase_difficulty_or_new_topic', 'move_to_next_topic']:
-            resp = f"Good discussion on that. Let's move to our next area: {topic_name}. How have you handled this in your projects?"
-        elif strategy == 'simplify_or_hint':
-            resp = f"No worries at all! Here's a quick thought regarding {topic_name}: think about practical scenarios you've seen. What comes to mind?"
-        else:
-            resp = f"Good point on the initial concept! Building on that, how would you address {topic_name} in a team setting?"
+    gen_result = None
+    gen_rejection_reason = None
+    raw_text = call_gemini(prompt)
+    if raw_text:
+        try:
+            cleaned_text = clean_json_response(raw_text)
+            parsed = json.loads(cleaned_text)
+            is_valid, reason = validate_generator_response(parsed)
+            if is_valid:
+                gen_result = parsed
+            else:
+                gen_rejection_reason = reason
+                print(f"[generate_question] Attempt 1 validation rejected: {reason}")
+        except Exception as e:
+            gen_rejection_reason = f"JSON parse error: {str(e)}"
+            print(f"[generate_question] Gemini parse exception attempt 1: {e}")
+    else:
+        gen_rejection_reason = "Empty response from Gemini"
 
-        gen_resp = {
-            "interviewerResponse": resp,
+    if not gen_result:
+        print(f"[generate_question] Retrying once with explicit correction instruction (reason: {gen_rejection_reason})...")
+        retry_prompt = prompt + f"""
+
+CRITICAL RETRY INSTRUCTION:
+Your previous response was invalid because: {gen_rejection_reason or 'Missing required fields or duplicate question'}. Return only valid JSON with all required fields:
+{{
+  "decision": "{expected_decision}",
+  "probe_type": "concept_gap",
+  "question": "Single concise question here? (max 1 '?')",
+  "evidence_to_probe": "phrase being probed",
+  "competency": "{topic_name}"
+}}
+Do NOT ask multiple questions in one turn. Do NOT repeat any previously asked question.
+"""
+        raw_retry = call_gemini(retry_prompt)
+        if raw_retry:
+            try:
+                cleaned_retry = clean_json_response(raw_retry)
+                parsed_retry = json.loads(cleaned_retry)
+                is_valid_retry, retry_reason = validate_generator_response(parsed_retry)
+                if is_valid_retry:
+                    gen_result = parsed_retry
+                else:
+                    gen_rejection_reason = retry_reason
+                    print(f"[generate_question] Retry validation rejected: {retry_reason}")
+            except Exception as e:
+                gen_rejection_reason = f"Retry parse error: {str(e)}"
+                print(f"[generate_question] Retry parse exception: {e}")
+
+    # Fallback to pre-written, reviewed fallback question from rubric bank (NOT a generic hardcoded string)
+    if not gen_result:
+        print(f"[DEGRADED_FALLBACK] Endpoint: /api/generate-question | Strategy: {strategy} | Reason: AI question generator failed schema validation ({gen_rejection_reason}); using reviewed fallback from rubric bank.")
+        fallback_q = rubric.get('sampleQuestion') or f"Can you walk me through the fundamental principles and practical trade-offs of {topic_name}?"
+        gen_result = {
+            "decision": expected_decision,
+            "probe_type": "rubric_fallback",
+            "question": fallback_q,
+            "evidence_to_probe": f"Core rubric principles of {topic_name}",
+            "competency": topic_name,
+            "interviewerResponse": fallback_q,
             "isFallback": True,
             "fallbackQuestion": True,
+            "fallbackUsed": True,
             "degraded": True,
-            "degradedReason": "AI question generator unavailable; using fallback turn question."
+            "degradedReason": f"AI question generator failed schema validation ({gen_rejection_reason}); using reviewed rubric fallback."
         }
     else:
-        if isinstance(gen_resp, dict):
-            gen_resp["isFallback"] = False
-            gen_resp["fallbackQuestion"] = False
-            gen_resp["degraded"] = False
+        q_text = str(gen_result.get('question', '')).strip()
+        gen_result['interviewerResponse'] = q_text
+        gen_result['isFallback'] = False
+        gen_result['fallbackQuestion'] = False
+        gen_result['fallbackUsed'] = False
+        gen_result['degraded'] = False
 
-    return jsonify(gen_resp)
+    return jsonify(gen_result)
 
 
 @app.route('/api/interview-session-turn', methods=['POST', 'OPTIONS'])

@@ -12,7 +12,8 @@ import { calculateConfidenceScore } from '../utils/confidenceScorer';
 import { getBackendUrl } from '../config/api';
 import { 
   initializeInterviewSession, 
-  updateStateAfterTurn 
+  updateStateAfterTurn,
+  markSessionCompleted
 } from '../services/conversationStateManager.js';
 import { evaluateDecisionEngine } from '../services/decisionEngine.js';
 import { executeInterviewTurn, executeOpeningTurn } from '../services/interviewPipeline.js';
@@ -900,7 +901,7 @@ export default function HrInterviewRoundPage() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
               <div className="space-y-2">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-mint-100 border border-warmborder text-leaf-600 text-xs font-bold">
-                  <Award className="w-4 h-4 text-leaf-600" /> Stage 6 Completed • HR & Culture Fit
+                  <Award className="w-4 h-4 text-leaf-600" /> Stage 7 Completed • HR & Culture Fit
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-bold font-serif text-darkcharcoal-900">
                   {companyName} HR & Cultural Alignment Scorecard
@@ -925,7 +926,7 @@ export default function HrInterviewRoundPage() {
               </div>
             </div>
 
-            {/* Advance to Stage 7 Final Evaluation CTA */}
+            {/* Advance to Stage 8 Final Evaluation CTA */}
             <div className="flex items-center justify-between pt-6 border-t border-warmborder">
               <button
                 type="button"
@@ -933,15 +934,19 @@ export default function HrInterviewRoundPage() {
                 className="px-5 py-2.5 rounded-full bg-white text-leaf-700 hover:bg-mint-100 border border-warmborder text-xs font-bold transition-colors flex items-center gap-2 shadow-warm-sm"
               >
                 <RotateCcw className="w-4 h-4 text-leaf-600" />
-                <span>Re-run Stage 6 HR Interview (New Questions)</span>
+                <span>Re-run Stage 7 HR Interview (New Questions)</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => navigate('/final-report')}
+                onClick={() => {
+                  const activeSession = sessionStateRef.current || sessionState;
+                  markSessionCompleted(activeSession?.sessionId, activeSession);
+                  navigate('/final-report');
+                }}
                 className="px-6 py-3 rounded-full bg-leaf-500 hover:bg-leaf-600 text-white font-extrabold text-xs shadow-warm-md hover:scale-[1.02] transition-transform flex items-center gap-2"
               >
-                <span>Proceed to Stage 7: Final Diagnostic Report</span>
+                <span>Proceed to Stage 8: Final Diagnostic Report</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>

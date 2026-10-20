@@ -75,7 +75,56 @@ export default function ResumePage() {
     uploadAndAnalyzeResume(selectedFile);
   };
 
+const SAMPLE_DEMO_RESUME = {
+  atsScore: 84,
+  overallImpression: "Strong competitive profile for Tier-1 Product Engineering. Demonstrates solid fundamentals in distributed backend systems, modular React architecture, and relational database indexing. Profile reflects high placement readiness with minor gaps in cloud-native orchestration.",
+  strengths: [
+    "Production experience with React, Node.js, and PostgreSQL indexing optimizations.",
+    "Engineered RESTful microservices with 99.8% uptime handling 15k+ daily requests.",
+    "Active algorithmic problem solving with 350+ DSA problems solved across LeetCode & Codeforces."
+  ],
+  weaknesses: [
+    {
+      issue: "Limited cloud orchestration & container scaling (Kubernetes, Terraform)",
+      recommendation: "Add containerized deployment pipelines or Docker Compose configurations to major projects."
+    },
+    {
+      issue: "Distributed caching & cache-invalidation strategies (Redis / Memcached)",
+      recommendation: "Demonstrate caching layers and Redis TTL patterns in system architecture projects."
+    }
+  ],
+  extractedSkills: [
+    "JavaScript", "TypeScript", "React", "Node.js", "Express", "Python",
+    "PostgreSQL", "MongoDB", "Redis", "Docker", "Git", "REST APIs",
+    "Data Structures & Algorithms", "System Design Lite"
+  ],
+  missingKeywords: [
+    "Kubernetes", "CI/CD Pipelines", "AWS S3 / EC2", "Microfrontends", "Kafka"
+  ],
+  extractedProfile: {
+    name: "Alex Candidate",
+    targetRole: "Full Stack / SDE",
+    topSkills: ["React", "Node.js", "Python", "PostgreSQL", "Docker"],
+    experienceSummary: "2+ years academic & internship experience building modern web architectures and REST APIs."
+  }
+};
+
   const [statusMessage, setStatusMessage] = useState('Analyzing resume and extracting skills...');
+
+  const handleLoadSampleResume = async () => {
+    setAnalyzing(true);
+    setAnalysisProgress(25);
+    setStatusMessage('Loading verified sample engineering resume...');
+    setErrorMsg('');
+    await new Promise(r => setTimeout(r, 400));
+    setAnalysisProgress(65);
+    setStatusMessage('Auditing technical skills & evaluating ATS alignment...');
+    await new Promise(r => setTimeout(r, 400));
+    setAnalysisProgress(100);
+    setAnalysisResults(SAMPLE_DEMO_RESUME);
+    await setResumeData(SAMPLE_DEMO_RESUME);
+    setAnalyzing(false);
+  };
 
   const uploadAndAnalyzeResume = async (pdfFile) => {
     setAnalyzing(true);
@@ -96,10 +145,10 @@ export default function ResumePage() {
         setStatusMessage('Extracting technical skills & auditing resume metrics...');
       } else if (elapsedSeconds < 25) {
         currentProgress = Math.min(85, currentProgress + 1);
-        setStatusMessage('Waking up backend server (Render free tier cold start)... This may take up to a minute.');
+        setStatusMessage('Auditing technical skills, evaluating keyword density & calibrating score...');
       } else {
         currentProgress = Math.min(95, currentProgress + 0.5);
-        setStatusMessage('Server waking up... Finishing resume evaluation.');
+        setStatusMessage('Finishing comprehensive resume evaluation...');
       }
       setAnalysisProgress(Math.round(currentProgress));
     }, 500);
@@ -201,7 +250,7 @@ export default function ResumePage() {
           <p className="text-xs text-warmtext-500">Supports standard single/multi-page engineering resumes (PDF format up to 10MB)</p>
         </div>
 
-        <div className="pt-2">
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
           <label className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-rust-500 hover:bg-rust-600 text-white font-extrabold text-xs shadow-glow-rust hover:scale-[1.02] cursor-pointer transition-all">
             <FileText className="w-4 h-4" />
             <span>Choose PDF File</span>
@@ -212,6 +261,16 @@ export default function ResumePage() {
               className="hidden" 
             />
           </label>
+
+          <button
+            type="button"
+            onClick={handleLoadSampleResume}
+            disabled={analyzing}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white hover:bg-peach-100 text-warmtext-900 border border-warmborder font-extrabold text-xs shadow-warm-sm hover:scale-[1.02] cursor-pointer transition-all disabled:opacity-50"
+          >
+            <Sparkles className="w-4 h-4 text-rust-500" />
+            <span>Use Sample SDE Resume</span>
+          </button>
         </div>
 
         {file && (

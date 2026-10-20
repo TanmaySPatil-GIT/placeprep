@@ -336,23 +336,18 @@ export function computeFacialConfidenceScore(telemetryLogs = []) {
 export function generateSessionEmotionTimeline(telemetryLogs = []) {
   if (!telemetryLogs || telemetryLogs.length === 0) {
     return {
-      timeline: [
-        { time: '0s', composureScore: 92, eyeContactScore: 92, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' },
-        { time: '15s', composureScore: 88, eyeContactScore: 88, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' },
-        { time: '30s', composureScore: 72, eyeContactScore: 72, state: 'Gaze Shifted', bucket: 'Looking Away', expression: 'neutral' },
-        { time: '45s', composureScore: 94, eyeContactScore: 94, state: 'Centered Eye Contact', bucket: 'Attentive', expression: 'neutral' }
-      ],
-      summaryLabel: "Eye contact maintained for 88% of the session with steady camera presence",
-      eyeContactPercentage: 88,
-      presencePercentage: 95,
-      stabilityPercentage: 90,
+      timeline: [],
+      summaryLabel: "Webcam telemetry unrecorded for this session",
+      eyeContactPercentage: null,
+      presencePercentage: null,
+      stabilityPercentage: null,
       bucketPercentages: { 
-        EyeContact: 88, 
-        Presence: 95, 
-        HeadStability: 90,
-        Confident: 88, 
-        Nervous: 12, 
-        Stressed: 0 
+        EyeContact: null, 
+        Presence: null, 
+        HeadStability: null,
+        Confident: null, 
+        Nervous: null, 
+        Stressed: null 
       }
     };
   }

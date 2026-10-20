@@ -107,10 +107,10 @@ export default function ProgressStepper() {
       isSkipped: false
     },
     {
-      stageNum: 7,
+      stageNum: 8,
       id: 'final-report',
       path: '/final-report',
-      title: '7. Final Report',
+      title: '8. Final Report',
       sub: 'Diagnostic Summary',
       icon: Award,
       isCompleted: false,

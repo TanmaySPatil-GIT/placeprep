@@ -18,7 +18,8 @@ import { INITIAL_INTERVIEW_QUESTIONS } from '../utils/seedInterviewQuestions';
 import { 
   initializeInterviewSession, 
   updateStateAfterTurn, 
-  buildPromptContextFromState 
+  buildPromptContextFromState,
+  markSessionCompleted
 } from '../services/conversationStateManager.js';
 import { executeInterviewTurn, executeOpeningTurn } from '../services/interviewPipeline.js';
 import { 
@@ -176,6 +177,8 @@ export default function InterviewRoundPage() {
   const [lastSegmentConfidence, setLastSegmentConfidence] = useState(0.85);
   const [evaluatingFollowup, setEvaluatingFollowup] = useState(false);
   const [savedAnswerMetrics, setSavedAnswerMetrics] = useState(null);
+  const [textInputMode, setTextInputMode] = useState(false);
+  const [manualTypedText, setManualTypedText] = useState('');
 
   const recognitionRef = useRef(null);
   const transcriptRef = useRef('');
@@ -599,7 +602,7 @@ export default function InterviewRoundPage() {
   };
 
   // Candidate Stops Answer & Triggers AI Adaptive Follow-Up Engine
-  const handleStopAnswer = async () => {
+  const handleStopAnswer = async (explicitText = null) => {
     console.log('[InterviewRoundPage:Tech] [setState START] setIsAnswering(false), setAiState("thinking"), setEvaluatingFollowup(true)');
     setIsAnswering(false);
     setAiState('thinking');
@@ -615,7 +618,7 @@ export default function InterviewRoundPage() {
     }
 
     try {
-      const capturedText = (transcriptRef.current || liveTranscript).trim();
+      const capturedText = (typeof explicitText === 'string' && explicitText.trim() ? explicitText : (transcriptRef.current || liveTranscript)).trim();
 
       console.log('\n=================== [INTERVIEW DEBUG: TECHNICAL ROUND] ===================');
       console.log('[Interview Debug] Step 1 - Transcript captured:', `"${capturedText}"`);
@@ -669,6 +672,8 @@ export default function InterviewRoundPage() {
         setTimeout(() => {
           triggerAISpeech(closingMsg);
           setTimeout(() => {
+            const activeSession = sessionStateRef.current || sessionState;
+            markSessionCompleted(activeSession?.sessionId, activeSession);
             setRoundIndex(2);
             navigate('/results');
           }, 4000);
@@ -1129,68 +1134,119 @@ export default function InterviewRoundPage() {
             
             <div className="flex items-center justify-between text-xs text-earth-cream/80 font-bold">
               <span className="flex items-center gap-1.5 text-accent-gold font-serif">
-                <Mic className="w-4 h-4 text-accent-gold" /> Your Spoken Answer Transcript
+                <Mic className="w-4 h-4 text-accent-gold" /> {textInputMode ? 'Candidate Written Answer' : 'Your Spoken Answer Transcript'}
               </span>
-              {isAnswering && <span className="text-sage-400 text-[11px] font-mono animate-pulse">Live Transcribing...</span>}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTextInputMode(!textInputMode)}
+                  className="text-[11px] text-accent-gold underline hover:text-white font-mono cursor-pointer"
+                >
+                  {textInputMode ? '🎙️ Switch to Microphone' : '⌨️ Type Answer Instead'}
+                </button>
+                {isAnswering && !textInputMode && <span className="text-sage-400 text-[11px] font-mono animate-pulse">Live Transcribing...</span>}
+              </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-forest-900/80 border border-forest-600/30 min-h-[90px] text-xs leading-relaxed text-earth-cream">
-              {isAnswering ? (
-                liveTranscript ? (
-                  <p>{liveTranscript}</p>
-                ) : (
-                  <p className="text-earth-cream/60 italic">Listening for your speech... Speak clearly into your microphone.</p>
-                )
-              ) : savedAnswerMetrics ? (
-                <div className="space-y-2">
-                  <p className="font-semibold text-white">{savedAnswerMetrics.transcript}</p>
-                  <div className="p-2.5 rounded-xl bg-forest-800/90 border border-forest-600/40 text-[11px] grid grid-cols-2 gap-2 text-earth-cream/70">
-                    <div>Pace: <strong className="text-white">{savedAnswerMetrics.metrics.wordsPerMinute} WPM</strong></div>
-                    <div>Fillers: <strong className="text-accent-gold">{savedAnswerMetrics.metrics.fillerWordCount}</strong></div>
+            {textInputMode ? (
+              <div className="space-y-3 p-1">
+                <textarea
+                  value={manualTypedText}
+                  onChange={(e) => setManualTypedText(e.target.value)}
+                  placeholder="Type your technical response here (explain your thought process, data structures, edge cases, and design trade-offs)..."
+                  rows={4}
+                  className="w-full p-3.5 rounded-2xl bg-forest-900 border border-forest-600/40 text-xs text-earth-cream placeholder:text-earth-cream/40 focus:outline-none focus:border-accent-gold font-mono leading-relaxed resize-none shadow-inner"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (manualTypedText.trim()) {
+                      handleStopAnswer(manualTypedText);
+                      setManualTypedText('');
+                      setTextInputMode(false);
+                    }
+                  }}
+                  disabled={!manualTypedText.trim() || evaluatingFollowup || !hasStartedSession}
+                  className="w-full py-3 rounded-full bg-gradient-to-r from-accent-gold to-earth-tan text-forest-900 font-extrabold text-xs shadow-glow-gold hover:scale-[1.01] transition-all disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Submit Answer & Get Adaptive Feedback</span>
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 rounded-2xl bg-forest-900/80 border border-forest-600/30 min-h-[90px] text-xs leading-relaxed text-earth-cream">
+                {isAnswering ? (
+                  liveTranscript ? (
+                    <p>{liveTranscript}</p>
+                  ) : (
+                    <p className="text-earth-cream/60 italic">Listening for your speech... Speak clearly into your microphone.</p>
+                  )
+                ) : savedAnswerMetrics ? (
+                  <div className="space-y-2">
+                    <p className="font-semibold text-white">{savedAnswerMetrics.transcript}</p>
+                    <div className="p-2.5 rounded-xl bg-forest-800/90 border border-forest-600/40 text-[11px] grid grid-cols-2 gap-2 text-earth-cream/70">
+                      <div>Pace: <strong className="text-white">{savedAnswerMetrics.metrics.wordsPerMinute} WPM</strong></div>
+                      <div>Fillers: <strong className="text-accent-gold">{savedAnswerMetrics.metrics.fillerWordCount}</strong></div>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <p className="text-earth-cream/60 italic">
-                  {aiState === 'speaking' 
-                    ? 'Wait for the AI Interviewer to finish speaking before starting your answer.'
-                    : 'Click "Start Answer Recording" below to speak your response.'}
-                </p>
-              )}
-            </div>
+                ) : (
+                  <p className="text-earth-cream/60 italic">
+                    {aiState === 'speaking' 
+                      ? 'Wait for the AI Interviewer to finish speaking before starting your answer.'
+                      : 'Click "Start Answer Recording" below to speak your response.'}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Answer Control Buttons */}
             <div className="space-y-2">
-              {!isAnswering ? (
-                <button
-                  onClick={handleStartAnswer}
-                  disabled={!hasStartedSession || aiState === 'speaking' || evaluatingFollowup}
-                  className="w-full py-3.5 rounded-full bg-gradient-to-r from-accent-gold to-earth-tan text-forest-900 font-extrabold text-xs shadow-glow-gold hover:scale-[1.02] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  <Mic className="w-4 h-4" />
-                  <span>
-                    {!hasStartedSession ? 'Start Session Above First' : aiState === 'speaking' ? 'AI is speaking question...' : 'Start Answer Recording'}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  onClick={handleStopAnswer}
-                  className="w-full py-3.5 rounded-full bg-earth-terracotta text-white font-extrabold text-xs shadow-lg animate-pulse hover:bg-earth-terracotta/90 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Square className="w-4 h-4 fill-white" />
-                  <span>Submit Answer & Get Adaptive Follow-Up</span>
-                </button>
+              {!textInputMode && (
+                !isAnswering ? (
+                  <button
+                    onClick={handleStartAnswer}
+                    disabled={!hasStartedSession || aiState === 'speaking' || evaluatingFollowup}
+                    className="w-full py-3.5 rounded-full bg-gradient-to-r from-accent-gold to-earth-tan text-forest-900 font-extrabold text-xs shadow-glow-gold hover:scale-[1.02] transition-all disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span>
+                      {!hasStartedSession ? 'Start Session Above First' : aiState === 'speaking' ? 'AI is speaking question...' : 'Start Answer Recording'}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleStopAnswer()}
+                    className="w-full py-3.5 rounded-full bg-earth-terracotta text-white font-extrabold text-xs shadow-lg animate-pulse hover:bg-earth-terracotta/90 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Square className="w-4 h-4 fill-white" />
+                    <span>Submit Answer & Get Adaptive Follow-Up</span>
+                  </button>
+                )
               )}
 
-              <div className="flex items-center justify-between gap-3 pt-1 text-xs">
+              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1 text-xs">
                 <button
                   onClick={() => {
                     stopSpeech();
-                    setRoundIndex(2);
-                    navigate('/results');
+                    const activeSession = sessionStateRef.current || sessionState;
+                    markSessionCompleted(activeSession?.sessionId, activeSession);
+                    navigate('/round/hr-interview');
                   }}
-                  className="w-full py-2.5 rounded-full bg-forest-900 hover:bg-forest-600 text-earth-cream/80 text-xs font-semibold border border-forest-600/40 transition-colors flex items-center justify-center gap-1.5"
+                  className="w-full py-2.5 rounded-full bg-forest-900 hover:bg-forest-700 text-accent-gold text-xs font-bold border border-accent-gold/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                 >
-                  <span>Finish Interview & View Final Diagnostic Report</span>
+                  <span>Proceed to Stage 7: HR Interview</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    stopSpeech();
+                    const activeSession = sessionStateRef.current || sessionState;
+                    markSessionCompleted(activeSession?.sessionId, activeSession);
+                    navigate('/final-report');
+                  }}
+                  className="w-full py-2.5 rounded-full bg-forest-900 hover:bg-forest-800 text-earth-cream/70 text-xs font-semibold border border-forest-600/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>Skip to Final Report</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>

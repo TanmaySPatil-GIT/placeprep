@@ -1,7 +1,58 @@
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase.js';
 import { INITIAL_INTERVIEW_RUBRICS } from '../utils/seedInterviewRubrics.js';
-import { evaluateDecisionEngine } from './decisionEngine.js';
+import { evaluateDecisionEngine, INTERVIEW_STATES, MAX_PROBES_PER_TOPIC } from './decisionEngine.js';
+
+export { INTERVIEW_STATES, MAX_PROBES_PER_TOPIC };
+
+/**
+ * Normalized 32-bit FNV-1a hash of question text for fast duplicate detection
+ */
+export function hashQuestion(questionText = '') {
+  if (!questionText || typeof questionText !== 'string') return '';
+  const normalized = questionText
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `qh_${(hash >>> 0).toString(16)}`;
+}
+
+/**
+ * Record a state transition with timestamp on session object and Firestore
+ */
+export function recordStateTransition(session, toState, reason = '', details = {}) {
+  if (!session) return session;
+  const fromState = session.currentState || INTERVIEW_STATES.PLAN;
+  session.currentState = toState;
+  if (!Array.isArray(session.stateTransitions)) {
+    session.stateTransitions = [];
+  }
+  const entry = {
+    from: fromState,
+    to: toState,
+    timestamp: new Date().toISOString(),
+    reason: reason || ''
+  };
+  if (details && Object.keys(details).length > 0) {
+    entry.details = details;
+  }
+  session.stateTransitions.push(entry);
+  session.updatedAt = new Date().toISOString();
+  if (session.sessionId) {
+    firestoreSaveAsync('interviewSessions', session.sessionId, {
+      currentState: session.currentState,
+      stateTransitions: session.stateTransitions,
+      updatedAt: session.updatedAt
+    }, true);
+  }
+  return session;
+}
 
 // ---------------------------------------------------------------------------
 // Internal helper: fire-and-forget Firestore write (never blocks the caller)
@@ -51,7 +102,8 @@ function buildTopicPlanSync(selectedField, roundType) {
     topicId: t.topicId,
     topicName: t.topicName,
     status: idx === 0 ? 'in_progress' : 'not_started',
-    mastery: null
+    mastery: null,
+    probeCount: 0
   }));
 }
 
@@ -78,13 +130,25 @@ export async function initializeInterviewSession({
     selectedCompany,
     selectedField,
     roundType: roundType.toLowerCase(),
+    currentState: INTERVIEW_STATES.PLAN,
+    stateTransitions: [
+      {
+        from: null,
+        to: INTERVIEW_STATES.PLAN,
+        timestamp: new Date().toISOString(),
+        reason: 'Initial session initialization and topic plan construction'
+      }
+    ],
     topicPlan,
     currentTopicId: topicPlan[0]?.topicId || (roundType === 'hr' ? 'behavioral-handling-conflict' : 'oop-inheritance'),
     currentDepth: 0,
+    probeCount: 0,
     difficultyLevel: difficultyLevel.toLowerCase(),
     historySummary: '',
     recentTurns: [],
     askedQuestions: [],
+    askedQuestionIds: [],
+    askedQuestionHashes: [],
     weakSignals: [],
     strongSignals: [],
     evaluationLog: [],
@@ -152,19 +216,31 @@ export async function updateStateAfterTurn(sessionId, {
 
   // Initialize tracking collections if not present
   updatedSession.askedQuestions = updatedSession.askedQuestions || [];
+  updatedSession.askedQuestionIds = updatedSession.askedQuestionIds || [];
+  updatedSession.askedQuestionHashes = updatedSession.askedQuestionHashes || [];
+  updatedSession.stateTransitions = updatedSession.stateTransitions || [];
   updatedSession.recentTurns = updatedSession.recentTurns || [];
   updatedSession.evaluationLog = updatedSession.evaluationLog || [];
   updatedSession.strongSignals = updatedSession.strongSignals || [];
   updatedSession.weakSignals = updatedSession.weakSignals || [];
 
-  const turnIsFallback = Boolean(isFallbackQuestion || evaluatorOutput.isFallbackQuestion || evaluatorOutput.fallbackQuestion || evaluatorOutput.isFallback);
+  const turnIsFallback = Boolean(isFallbackQuestion || evaluatorOutput.isFallbackQuestion || evaluatorOutput.fallbackQuestion || evaluatorOutput.isFallback || evaluatorOutput.fallbackUsed);
 
   // A. Append to recentTurns and track in askedQuestions history
   if (question && question.trim()) {
     const trimmedQ = question.trim();
+    const qHash = hashQuestion(trimmedQ);
+    const qId = `q_${updatedSession.currentTopicId}_${updatedSession.evaluationLog.length + 1}`;
+
     updatedSession.recentTurns.push({ role: 'interviewer', text: trimmedQ, isFallbackQuestion: turnIsFallback });
     if (!updatedSession.askedQuestions.includes(trimmedQ)) {
       updatedSession.askedQuestions.push(trimmedQ);
+    }
+    if (!updatedSession.askedQuestionHashes.includes(qHash)) {
+      updatedSession.askedQuestionHashes.push(qHash);
+    }
+    if (!updatedSession.askedQuestionIds.includes(qId)) {
+      updatedSession.askedQuestionIds.push(qId);
     }
   }
   if (studentAnswer && studentAnswer.trim()) {
@@ -181,7 +257,7 @@ export async function updateStateAfterTurn(sessionId, {
     studentAnswer: studentAnswer || '',
     score: isUnavailable ? null : (evaluatorOutput.score ?? (evaluatorOutput.verdict === 'correct' ? 100 : evaluatorOutput.verdict === 'partially_correct' ? 70 : 30)),
     passed: isUnavailable ? null : (evaluatorOutput.passed ?? (evaluatorOutput.verdict === 'correct' || evaluatorOutput.verdict === 'partially_correct')),
-    verdict: evaluatorOutput.verdict || 'partially_correct',
+    verdict: evaluatorOutput.verdict || 'evaluation_unavailable',
     conceptsCorrect: evaluatorOutput.conceptsCorrect || evaluatorOutput.keyConceptsCovered || [],
     conceptsWrong: evaluatorOutput.conceptsWrong || evaluatorOutput.misconceptionsTriggered || [],
     conceptsMissing: evaluatorOutput.conceptsMissing || evaluatorOutput.keyConceptGaps || [],
@@ -190,6 +266,7 @@ export async function updateStateAfterTurn(sessionId, {
     modelUsed: evaluatorOutput.modelUsed || 'unknown',
     uncertainty: evaluatorOutput.uncertainty || (isUnavailable ? 'high' : 'low'),
     degraded: Boolean(evaluatorOutput.degraded || isUnavailable),
+    fallbackUsed: Boolean(evaluatorOutput.fallbackUsed || isUnavailable || turnIsFallback),
     isFallbackQuestion: turnIsFallback,
     reason: evaluatorOutput.reason || evaluatorOutput.feedback || '',
     keyConceptsCovered: evaluatorOutput.conceptsCorrect || evaluatorOutput.keyConceptsCovered || [],
@@ -226,6 +303,13 @@ export async function updateStateAfterTurn(sessionId, {
     decision = evaluateDecisionEngine(evaluatorOutput, updatedSession, studentAnswer);
   }
 
+  // Record Decision state transition
+  const decisionState = decision.decisionState || (decision.topicAdvance ? INTERVIEW_STATES.ADVANCE : INTERVIEW_STATES.PROBE);
+  recordStateTransition(updatedSession, decisionState, decision.reason || decision.strategy, {
+    topicAdvance: decision.topicAdvance,
+    probeCount: updatedSession.probeCount
+  });
+
   // E. Apply Strategy Results to Topic Plan, Depth, & Difficulty Level
   if (decision.topicAdvance) {
     // Find current topic in topicPlan and mark strictly completed
@@ -233,6 +317,7 @@ export async function updateStateAfterTurn(sessionId, {
     if (currentTopicObj) {
       currentTopicObj.status = 'completed';
       currentTopicObj.mastery = evaluatorOutput.score ?? (evaluatorOutput.verdict === 'correct' ? 95 : 75);
+      currentTopicObj.probeCount = currentTopicObj.probeCount || 0;
 
       // Collect turn evaluation entries for this completed topic
       const topicName = currentTopicObj.topicName || updatedSession.currentTopicId;
@@ -282,7 +367,8 @@ export async function updateStateAfterTurn(sessionId, {
           topicId: extraRubric.topicId,
           topicName: extraRubric.topicName,
           status: 'in_progress',
-          mastery: null
+          mastery: null,
+          probeCount: 0
         };
         updatedSession.topicPlan.push(nextTopic);
         console.log(`[ConversationStateManager: Dynamic Topic Expansion] Appended unvisited rubric: ${extraRubric.topicId}`);
@@ -291,8 +377,11 @@ export async function updateStateAfterTurn(sessionId, {
 
     if (nextTopic) {
       nextTopic.status = 'in_progress';
+      nextTopic.probeCount = 0;
       updatedSession.currentTopicId = nextTopic.topicId;
       updatedSession.currentDepth = 0;
+      updatedSession.probeCount = 0;
+      recordStateTransition(updatedSession, INTERVIEW_STATES.ADVANCE, `Advanced to next topic: ${nextTopic.topicId}`);
       console.log(`[ConversationStateManager: Topic Advancement] Switched to new topic: ${nextTopic.topicId} (${nextTopic.topicName})`);
     } else {
       console.log('[ConversationStateManager: Topic Advancement] All available topics in rubric bank completed for this session!');
@@ -307,8 +396,16 @@ export async function updateStateAfterTurn(sessionId, {
     });
 
   } else if (!decision.isNavigation) {
-    // Increment depth on current topic unless it was a navigation intent
+    // Increment depth and probe count on current topic
     updatedSession.currentDepth = (updatedSession.currentDepth || 0) + 1;
+    updatedSession.probeCount = (updatedSession.probeCount || 0) + 1;
+    const currentTopicObj = updatedSession.topicPlan.find(t => t.topicId === updatedSession.currentTopicId);
+    if (currentTopicObj) {
+      currentTopicObj.probeCount = (currentTopicObj.probeCount || 0) + 1;
+    }
+    recordStateTransition(updatedSession, INTERVIEW_STATES.PROBE, `Probing topic ${updatedSession.currentTopicId} (${updatedSession.probeCount}/${MAX_PROBES_PER_TOPIC})`);
+  } else {
+    recordStateTransition(updatedSession, INTERVIEW_STATES.CLARIFY, `Clarifying topic ${updatedSession.currentTopicId}`);
   }
 
   if (decision.newDifficultyLevel) {
@@ -361,3 +458,23 @@ ${recentTurnsFormatted || 'Session started.'}
 ===========================================================
 `;
 }
+
+/**
+ * 5. Mark session as completed in Firestore
+ */
+export async function markSessionCompleted(sessionId, sessionState = {}) {
+  const sid = sessionId || sessionState?.sessionId;
+  if (!sid) return null;
+  const updated = {
+    ...sessionState,
+    sessionId: sid,
+    status: 'completed',
+    currentState: INTERVIEW_STATES.FINISH,
+    completedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  recordStateTransition(updated, INTERVIEW_STATES.FINISH, 'Interview session completed');
+  firestoreSaveAsync('interviewSessions', sid, updated, true);
+  return updated;
+}
+

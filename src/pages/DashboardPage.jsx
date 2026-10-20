@@ -91,13 +91,14 @@ export default function DashboardPage() {
       if (rep.roundBreakdown) {
         rep.roundBreakdown.forEach(rb => {
           if (typeof rb.score === 'number' && rb.score < 60) {
-            let route = '/dsa-round';
+            let route = '/round/dsa';
             const nameLower = (rb.roundName || '').toLowerCase();
-            if (nameLower.includes('aptitude') || nameLower.includes('gk')) route = '/aptitude-round';
-            else if (nameLower.includes('mcq')) route = '/technical-mcq-round';
-            else if (nameLower.includes('dsa') || nameLower.includes('coding')) route = '/dsa-round';
-            else if (nameLower.includes('hr')) route = '/hr-interview-round';
-            else if (nameLower.includes('interview') || nameLower.includes('voice')) route = '/interview-round';
+            if (nameLower.includes('aptitude') || nameLower.includes('gk')) route = '/round/aptitude';
+            else if (nameLower.includes('mcq')) route = '/round/tech-mcq';
+            else if (nameLower.includes('dsa') || nameLower.includes('coding')) route = '/round/dsa';
+            else if (nameLower.includes('hr')) route = '/round/hr-interview';
+            else if (nameLower.includes('interview') || nameLower.includes('voice')) route = '/round/interview';
+            else if (nameLower.includes('system') || nameLower.includes('design')) route = '/round/system-design';
 
             lowRounds.push({
               id: `${rep.id}-${rb.roundName}`,
@@ -119,7 +120,7 @@ export default function DashboardPage() {
         roundName: 'Stage 3: Technical MCQs (DBMS / OS)',
         score: 54,
         takeaway: 'Scored 54% on core operating system memory & lock primitives.',
-        route: '/technical-mcq-round'
+        route: '/round/tech-mcq'
       });
     }
 
