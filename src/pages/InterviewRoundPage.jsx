@@ -1255,9 +1255,10 @@ export default function InterviewRoundPage() {
                     markSessionCompleted(activeSession?.sessionId, activeSession);
                     navigate('/final-report');
                   }}
-                  className="w-full py-2.5 rounded-full bg-forest-900 hover:bg-forest-800 text-earth-cream/70 text-xs font-semibold border border-forest-600/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-2.5 rounded-full bg-forest-900 hover:bg-forest-800 text-amber-300 text-xs font-semibold border border-amber-400/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
                 >
-                  <span>Skip to Final Report</span>
+                  <Award className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Generate Whole Report & Certificate</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>

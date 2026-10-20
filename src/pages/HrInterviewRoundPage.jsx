@@ -1031,9 +1031,10 @@ export default function HrInterviewRoundPage() {
                   markSessionCompleted(activeSession?.sessionId, activeSession);
                   navigate('/final-report');
                 }}
-                className="px-6 py-3 rounded-full bg-leaf-500 hover:bg-leaf-600 text-white font-extrabold text-xs shadow-warm-md hover:scale-[1.02] transition-transform flex items-center gap-2"
+                className="px-7 py-3 rounded-full bg-gradient-to-r from-leaf-600 via-emerald-600 to-teal-700 hover:from-leaf-700 hover:to-teal-800 text-white font-black text-xs shadow-warm-md hover:scale-[1.02] transition-all flex items-center gap-2.5 cursor-pointer"
               >
-                <span>Proceed to Stage 8: Final Diagnostic Report</span>
+                <Award className="w-4 h-4 text-amber-300" />
+                <span>Generate Whole Placement Report & Certificate (Stage 8)</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
