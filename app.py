@@ -372,6 +372,72 @@ Return this exact JSON structure:
         "note": f"Feedback generated via PlacePrep engine for {company}."
     })
 
+def extract_clean_resume_text(pdf_bytes_io):
+    """
+    Layout-aware PDF text extractor.
+    Detects and preserves multi-column resumes (Canva, LaTeX, Novoresume)
+    so columns are extracted sequentially rather than horizontally scrambled.
+    """
+    import pdfplumber
+    extracted_text = ""
+    with pdfplumber.open(pdf_bytes_io) as pdf:
+        for page in pdf.pages:
+            try:
+                words = page.extract_words(keep_blank_chars=False)
+                if not words:
+                    t = page.extract_text()
+                    if t:
+                        extracted_text += t + "\n"
+                    continue
+                
+                width = float(page.width)
+                # Check for a vertical gutter between 25% and 55% of page width
+                step = width / 100.0
+                gutter_candidates = []
+                for i in range(25, 55):
+                    gx = i * step
+                    overlap = sum(1 for w in words if w['x0'] < gx < w['x1'])
+                    if overlap == 0:
+                        gutter_candidates.append(gx)
+                
+                if gutter_candidates:
+                    best_gutter = gutter_candidates[len(gutter_candidates) // 2]
+                    left_words = [w for w in words if w['x1'] <= best_gutter]
+                    right_words = [w for w in words if w['x0'] >= best_gutter]
+                    
+                    # If both columns contain meaningful content (>15% of total words each)
+                    if len(left_words) > len(words) * 0.15 and len(right_words) > len(words) * 0.15:
+                        def format_column_words(w_list):
+                            w_sorted = sorted(w_list, key=lambda w: (round(w['top'] / 4) * 4, w['x0']))
+                            lines = []
+                            cur_line = []
+                            last_y = None
+                            for w in w_sorted:
+                                y = round(w['top'] / 4) * 4
+                                if last_y is not None and abs(y - last_y) > 3:
+                                    lines.append(" ".join(cur_line))
+                                    cur_line = [w['text']]
+                                else:
+                                    cur_line.append(" ".join(cur_line))
+                                last_y = y
+                            if cur_line:
+                                lines.append(" ".join(cur_line))
+                            return "\n".join(lines)
+                        
+                        page_text = format_column_words(left_words) + "\n\n" + format_column_words(right_words)
+                        extracted_text += page_text + "\n"
+                        continue
+            except Exception as e:
+                print(f"[ResumeParser] Notice during column-aware page processing: {e}")
+            
+            # Default to layout-aware standard extraction
+            t = page.extract_text(layout=True) or page.extract_text()
+            if t:
+                extracted_text += t + "\n"
+                
+    return extracted_text.strip()
+
+
 @app.route('/api/analyze-resume', methods=['POST', 'OPTIONS'])
 @rate_limit(max_requests=15, window_seconds=60)
 def analyze_resume():
@@ -426,22 +492,33 @@ def analyze_resume():
         company_name = (raw_company_name.strip() if raw_company_name else '') or 'Google'
 
         try:
-            import pdfplumber
             import io
-            pdf_bytes = io.BytesIO(file.read())
-            extracted_text = ""
-            with pdfplumber.open(pdf_bytes) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        extracted_text += text + "\n"
+            raw_pdf_bytes = file.read()
+            pdf_bytes_io = io.BytesIO(raw_pdf_bytes)
+            cleaned_resume_text = extract_clean_resume_text(pdf_bytes_io)
         except Exception as e:
             return jsonify({"error": f"Failed to extract text from PDF: {str(e)}. Please upload a valid text-based PDF."}), 400
 
-        cleaned_resume_text = extracted_text.strip()
+        # Scanned / Image-based PDF fallback: try multimodal Gemini Vision if available
+        if (not cleaned_resume_text or len(cleaned_resume_text) < 40) and genai_client:
+            try:
+                from google.genai import types
+                print("[ResumeParser] Low text extracted (<40 chars). Engaging Gemini Multimodal PDF Vision fallback...")
+                ocr_prompt = "Transcribe the full text of this candidate resume thoroughly and accurately. Maintain section headers (Education, Experience, Skills, Projects)."
+                pdf_part = types.Part.from_bytes(data=raw_pdf_bytes, mime_type="application/pdf")
+                vision_resp = genai_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[pdf_part, ocr_prompt]
+                )
+                if vision_resp and vision_resp.text:
+                    cleaned_resume_text = vision_resp.text.strip()
+                    print(f"[ResumeParser] Multimodal Vision successfully extracted {len(cleaned_resume_text)} characters.")
+            except Exception as vision_err:
+                print(f"[ResumeParser] Vision fallback notice: {vision_err}")
+
         if not cleaned_resume_text or len(cleaned_resume_text) < 40:
             return jsonify({
-                "error": "Could not extract text from this PDF. Please upload a text-based PDF resume rather than a scanned image PDF."
+                "error": "Could not extract text from this PDF. Please upload a readable text-based PDF resume rather than a low-quality scanned image."
             }), 400
 
         tier_info = get_company_tier_info(company_name)
@@ -451,7 +528,7 @@ The candidate is applying for a {target_field} position.
 
 Candidate's Resume Text:
 --- RESUME TEXT START ---
-{cleaned_resume_text[:4000]}
+{cleaned_resume_text[:12000]}
 --- RESUME TEXT END ---
 
 EVALUATION BAR & STRICT CALIBRATION ({tier_info['tierName']}):
