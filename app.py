@@ -164,12 +164,37 @@ def get_company_tier_info(company_name: str) -> dict:
         }
 
 @app.route('/health', methods=['GET'])
-
 def health_check():
     return jsonify({
         "status": "online",
         "service": "PlacePrep AI Backend",
         "geminiConfigured": genai_client is not None
+    })
+
+@app.route('/api/gemini-debug', methods=['GET'])
+def gemini_debug():
+    if not genai_client:
+        return jsonify({"configured": False, "error": "genai_client is None"})
+    debug_info = {}
+    for model_name in MODEL_FALLBACK_CHAIN:
+        try:
+            resp = genai_client.models.generate_content(
+                model=model_name,
+                contents="Say hello in JSON format: {\"msg\": \"hello\"}"
+            )
+            debug_info[model_name] = {
+                "success": True,
+                "text": resp.text[:50] if resp and resp.text else ""
+            }
+            break
+        except Exception as e:
+            debug_info[model_name] = {
+                "success": False,
+                "error": str(e)
+            }
+    return jsonify({
+        "configured": True,
+        "results": debug_info
     })
 
 @app.route('/api/interview-feedback', methods=['POST'])
